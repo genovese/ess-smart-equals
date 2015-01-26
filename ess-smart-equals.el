@@ -4,10 +4,10 @@
 
 ;; Author: Christopher R. Genovese <genovese@cmu.edu>
 ;; Maintainer: Christopher R. Genovese <genovese@cmu.edu>
-;; Keywords: helm, sources, matching, convenience
-;; URL: http://sulu.github.io
-;; Version: 0.1.1
-;; Package-Version: 0.1.1
+;; Keywords: R, S, ESS, convenience
+;; URL: https://github.com/genovese/ess-smart-equals
+;; Version: 0.2.1
+;; Package-Version: 0.2.1
 ;; Package-Requires: ((emacs "24") (ess "10.00"))
 
 
