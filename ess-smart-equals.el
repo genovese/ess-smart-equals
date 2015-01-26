@@ -1,4 +1,4 @@
-;;; ess-smart-equals.el -- better smart-assignment with = in R, no underscores  -*- lexical-binding: t; -*-
+;;; ess-smart-equals.el -- better smart-assignment with = in R and S, no underscores  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2010-2015 Christopher R. Genovese, all rights reserved.
 
@@ -35,12 +35,12 @@
 ;;  Assignment in R is syntactically complicated by two features: 1. the
 ;;  historical role of '_' (underscore) as an assignment character in
 ;;  the S language (SPlus may still allow this) and 2. the somewhat
-;;  inconvenient to, type, if conceptually pure, '<-' operator as the
+;;  inconvenient to type, if conceptually pure, '<-' operator as the
 ;;  preferred assignment operator.
 ;;
 ;;  ESS uses '_' as a (default) smart assignment character which expands
 ;;  to the '<-' with one invokation and gives an underscore on two.
-;;  This makes it somewhat painful to use underscores in variable, field,
+;;  This makes it rather painful to use underscores in variable, field,
 ;;  and function names. Moreover, _ no longer has any association with
 ;;  assignment in R, so the mnemonic is strained.
 ;;
@@ -49,25 +49,53 @@
 ;;  multiple roles that '=' can play.
 ;;
 ;;  This package gives an alternative smart assignment for R and S code
-;;  that is tied to the `=' key. It works under the assumption that
-;;  binary operators involving `=' will be surrounded by spaces but that
-;;  default argument assignment with `=' *will not*.
+;;  that is tied to the '=' key. It works under the assumption that
+;;  binary operators involving '=' will be surrounded by spaces but that
+;;  default argument assignment with '=' *will not*.
 ;;
 ;;  This package defines a global minor mode `ess-smart-equals-mode',
-;;  that when enabled causes the following behaviors on seeing an `=' key:
+;;  that when enabled causes the following behaviors on seeing an '=' key:
 ;;
-;;   1. In a string or comment or with a non-S language, insert `='.
-;;   2. If a space (or tab) preceeds the `=', insert a version of `ess-S-assign'
-;;      with no leading space. (Other preceeding spaces are left alone.)
-;;   3. If any of =<>! preceed the current `=', insert an `= ', but
+;;   1. In a string or comment or with a non-S language, just insert '='.
+;;   2. If a space (or tab) preceeds the '=', insert a version of `ess-S-assign'
+;;      with no leading space (e.g., "<- "). (Other preceeding spaces are
+;;      left alone.)
+;;   3. If any of =<>! preceed the current '=', insert an '= ', but
 ;;      if no space preceeds the preceeding character, insert a space
-;;      so that the binary operator is surrounded by spaces.
-;;   4. Otherwise, just insert an `='.
+;;      so that the resulting binary operator is surrounded by spaces.
+;;   4. If the `ess-S-assign' string (e.g., "<- ") precedes point,
+;;      insert '== ' (a double *not* a single equals).
+;;   5. Otherwise, just insert an '='.
+;;
+;;  With a prefix argument, '=' always just inserts an '='.
 ;;
 ;;  These insertions ensure that binary operators have a space on either
-;;  end but they do not otherwise adjust spacing on either side. Disabling
-;;  the minor mode restores (as well as possible) the previous ESS assignment
-;;  setup.
+;;  end but they do not otherwise adjust spacing on either side. Note that
+;;  in #4 above, the second '=' key is assumed to be intended as an equality
+;;  comparison because the assignment would have been produced by an '='
+;;  following a space.
+;;
+;;  Examples: In the left column below, ^ marks the location at which an '='
+;;  key is pressed, and in the right column it marks the resulting
+;;  position of point.
+;;
+;;     Before '='         After '='
+;;     ----------         ---------
+;;     foo ^              foo <- ^
+;;     foo     ^          foo     <- ^
+;;     foo(a^             foo(a=^
+;;     foo=^              foo == ^
+;;     foo<^              foo <= ^
+;;     "foo ^             "foo =^
+;;     #...foo ^          #...foo =^
+;;     foo <- ^           foo == ^
+;;
+;;
+;;  Installation
+;;  ------------
+;;  Either put this file on your load path
+;;  Disabling the minor mode restores (as well as possible) the previous
+;;  ESS assignment setup.
 ;;
 
 ;;; Change Log:
@@ -114,6 +142,7 @@ If so, return number of characters to its beginning; otherwise, nil."
                  (looking-at-p ess-S-assign)))
       ess-assign-len)))
 
+;;;###autoload
 (defun ess-smart-equals (&optional raw)
   "Insert an R assignment for equal signs preceded by spaces.
 For equal signs not preceded by spaces, as in argument lists,
@@ -126,15 +155,15 @@ of equals in every case."
       (cond
        ((or raw
             (not (equal ess-language "S"))
-            (not (string-match-p "[ \t=]" (string prev-char)))
+            (not (string-match-p "[ \t=<>!]" (string prev-char)))
             (ess-inside-string-or-comment-p (point)))
-        (insert ?=))
-       ((char-equal prev-char ?=)
+        (insert "="))
+       ((string-match-p "[=<>!]" (string prev-char))
         (when (save-excursion
                 (goto-char (- (point) 2)) ; OK if we go past beginning (ignore-errors (backward-char 2))
                 (not (looking-at-p "[ \t]")))
           (delete-char -1)
-          (insert " ="))
+          (insert " " prev-char))
         (insert "= "))
        (t
         (let ((back-by (ess-smart-equals--after-assign-p)))
@@ -143,13 +172,28 @@ of equals in every case."
             (delete-char (- back-by))
             (insert "== "))))))))
 
+;;;###autoload
 (define-minor-mode ess-smart-equals-mode
-     "Minor mode for setting = key to intelligently handle assignment.
-When enabled for S-language modes, an `=' key that follows a
-space is converted to an assignment (the string `ess-S-assign')
-except in strings and comments. An `=' key that follows any other
-character or in a string or comment is inserted as is; and `C-q =' 
-always inserts the character as is.
+     "Minor mode for setting the '=' key to intelligently handle assignment.
+
+When enabled for S-language modes, an '=' key uses the preceding character
+to determine the intended construct (assignment, comparison, default argument).
+Loosely, an '=' preceded by a space is converted to an assignment, an '='
+preceded by a comparison (<>!=) becomes a space-padded comparison operator,
+and otherwise just an '=' is inserted. The specific rules are as follows:
+
+  1. In a string or comment or with a non-S language, just insert '='.
+  2. If a space (or tab) preceeds the '=', insert a version of `ess-S-assign'
+     with no leading space (e.g., '<- ') so that assignment is surrounded 
+     by at least one space. (Other preceeding spaces are left alone.)
+  3. If any of '=<>!' preceed the current '=', insert an '= ', but
+     if no space preceeds the preceeding character, insert a space
+     so that the resulting binary operator is surrounded by spaces.
+  4. If the `ess-S-assign' string (e.g., '<- ') precedes point,
+     insert '== ' (a double *not* a single equals).
+  5. Otherwise, just insert an '='.
+
+With a prefix argument, '=' always just inserts an '='.
 
 This is a global minor mode that will affect the use of '=' in
 all ess-mode and inferior-ess-mode buffers. A local mode
@@ -158,7 +202,7 @@ may be included in a future version.
 Do not set the variable `ess-smart-equals-mode' directly; use the
 function of the same name instead. Also any changes to
 `ess-smart-S-assign-key' while this mode is enabled will have no
-affect and will be lost when it is disabled."
+effect and will be lost when the mode is disabled."
      :lighter nil
      :require 'ess-site
      (if (not ess-smart-equals-mode)
@@ -177,3 +221,6 @@ affect and will be lost when it is disabled."
          'ess-smart-equals)))
 
 
+(provide 'ess-smart-equals)
+
+;;; ess-smart-equals.el ends here
