@@ -1,0 +1,128 @@
+# ess-smart-equals.el
+
+Assignment in R is syntactically complicated by three features: 1. the
+historical role of '<sub>'</sub> (underscore) as an assignment character in
+the S language (SPlus may still allow this); 2. the somewhat
+inconvenient-to-type, if conceptually pure, '<-' operator as the
+preferred assignment operator; and 3. the ability to use either
+an '=' or an '<-' for assignment.
+
+ESS uses '<sub>'</sub> as a (default) smart assignment character which expands
+to the '<-' with one invokation and gives an underscore on two.
+This makes it rather painful to use underscores in variable, field,
+and function names. Moreover, \_ no longer has any association with
+assignment in R, so the mnemonic is strained.
+
+It is possible to reassign the special underscore to another character,
+such as '=', but that raises other inconviences because of the multiple
+roles that '=' can play (assignment and default argument setting).
+
+This package gives an alternative smart assignment for R and S code
+that is tied to the '=' key. It works under the assumption that
+binary operators involving '=' will be surrounded by spaces but that
+default argument assignment with '=' **will not**.
+
+This package defines a global minor mode `ess-smart-equals-mode`, that
+when enabled for S-language modes causes the '=' key to use the
+preceding character to determine the intended construct (assignment,
+comparison, default argument). Loosely speaking, an '=' preceded by a
+space is converted to an assignment, an '=' preceded by a comparison
+character (`<>!=`) becomes a space-padded comparison operator, and
+otherwise just an '=' is inserted. The specific rules are as follows:
+
+1.  In a string or comment or with a non-S language, just insert '='.
+2.  If a space (or tab) preceeds the '=', insert a version of \`ess-S-assign'
+    with no leading space (e.g., "<- "). (Other preceeding spaces are
+    left alone.)
+3.  If any of `=<>!` preceed the current '=', insert an '= ', but
+    if no space preceeds the preceeding character, insert a space
+    so that the resulting binary operator is surrounded by spaces.
+4.  If the \`ess-S-assign' string (e.g., "<- ") precedes point,
+    insert '== ' (a double **not** a single equals).
+5.  Otherwise, just insert an '='.
+
+With a prefix argument, '=' always just inserts an '='.
+
+These insertions ensure that binary operators have a space on either
+end but they do not otherwise adjust spacing on either side. Note that
+in #4 above, the second '=' key is assumed to be intended as an equality
+comparison because the assignment would have been produced by an '='
+following a space.
+
+
+## Installation
+
+This package is available on [MELPA](http://melpa.org), and you can install it with
+
+    M-x package-install ess-smart-equals
+
+or through the `list-packages` interface.
+
+Alternatively, you can use [Cask](https://github.com/cask/cask) by putting
+
+    (depends-on "ess")
+    (depends-on "ess-smart-equals")
+
+in the Cask file in your init directory and run
+
+    cask install
+
+to update your dependencies.
+
+Finally, you can put `ess-smart-equals.el` anywhere on
+your `load-path`.
+
+
+## Usage
+
+The package defines a minor mode `ess-smart-equals-mode`
+that operates in all S-language-mode buffers (e.g., R-mode,
+inferior-ess-mode, S-mode). The minor mode makes it
+easy to enable and disable the smart equals functionality.
+
+In any ess-mode buffer, toggle the mode with
+
+    M-x ess-smart-equals-mode
+
+You will likely want the mode enabled automatically
+in the appropriate buffers, so put
+
+    (add-hook 'ess-mode-hook 'ess-smart-equals-mode)
+    (add-hook 'inferior-ess-mode-hook 'ess-smart-equals-mode)
+
+in your `.emacs` file. Of course, you will need to install
+`ess` first.
+
+Here is an example `.emacs` initialization that uses
+the package `use-package` to :
+
+    (use-package ess
+      :defer t
+      :pre-load (setq ess-R-smart-operators t) ; enables smart commas too
+      :init (autoload 'R-mode "ess-site"       
+              "Major mode for editing R source.  See `ess-mode' for more help."
+              t)
+      :config (progn
+                (eval-after-load 'ess-smart-equals
+                  '(progn
+                     (add-hook 'ess-mode-hook 'ess-smart-equals-mode)
+                     (add-hook 'inferior-ess-mode-hook 'ess-smart-equals-mode)))
+                (use-package ess-smart-equals :ensure t)))
+
+
+## Examples
+
+In the left column below, ^ marks the location at which an '='
+key is pressed, and in the right column it marks the resulting
+position of point.
+
+    Before '='         After '='
+    ----------         ---------
+    foo ^              foo <- ^
+    foo     ^          foo     <- ^
+    foo(a^             foo(a=^
+    foo=^              foo == ^
+    foo<^              foo <= ^
+    "foo ^             "foo =^
+    #...foo ^          #...foo =^
+    foo <- ^           foo == ^

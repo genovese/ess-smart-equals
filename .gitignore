@@ -2,3 +2,4 @@
 .bonz*
 .DS_Store
 *.tgz
+.cask/*
