@@ -1,4 +1,4 @@
-;;; ess-smart-equals.el -- better smart-assignment with = in R and S, no underscores  -*- lexical-binding: t; -*-
+;;; ess-smart-equals.el --- better smart-assignment with =-key in R and S  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2010-2015 Christopher R. Genovese, all rights reserved.
 
@@ -8,7 +8,7 @@
 ;; URL: https://github.com/genovese/ess-smart-equals
 ;; Version: 0.2.1
 ;; Package-Version: 0.2.1
-;; Package-Requires: ((emacs "24") (ess "10.00"))
+;; Package-Requires: ((emacs "24") (ess "5.00"))
 
 
 ;;; License:
@@ -50,9 +50,13 @@
 ;;  roles that '=' can play (assignment and default argument setting).
 ;;
 ;;  This package gives an alternative smart assignment for R and S code
-;;  that is tied to the '=' key. It works under the assumption that
-;;  binary operators involving '=' will be surrounded by spaces but that
-;;  default argument assignment with '=' *will not*.
+;;  that is tied to the '=' key instead of the '_' key. It intelligently
+;;  handles the various ways that '=' is used in R (and S) by examining
+;;  the preceding context. It works under the assumption that '=' used
+;;  for default arguments to functions *will not* be surrounded by
+;;  spaces but that binary operators involving '=' /should be/. When
+;;  this is enabled, underscore is completely divorced from assignment
+;;  and thus can be used directly in names.
 ;;
 ;;  This package defines a global minor mode `ess-smart-equals-mode', that
 ;;  when enabled for S-language modes causes the '=' key to use the
@@ -120,11 +124,11 @@
   "Cached value of previous assignment string.")
 
 (defun ess-smart-equals--strip-leading-space (string)
-  "Strip one leading space from string, if present."
+  "Strip one leading space from STRING, if present."
   (replace-regexp-in-string "\\` " "" string))
 
 (defun ess-smart-equals--restore-leading-space (string)
-  "Add one leading space to string, if none are present."
+  "Add one leading space to STRING, if none are present."
   (replace-regexp-in-string "\\`\\(\\S-\\)" " \\1" string))
 
 (defun ess-smart-equals--maybe-narrow ()
@@ -141,7 +145,7 @@
          (pm/narrow-to-span))))
 
 (defun ess-smart-equals--after-assign-p ()
-  "Are we looking backward at `ess-S-assign'? 
+  "Are we looking backward at `ess-S-assign'?
 If so, return number of characters to its beginning; otherwise, nil."
   (let ((ess-assign-len (length ess-S-assign)))
     (when (and (>= (point) (+ ess-assign-len (point-min))) ; enough room back
@@ -154,8 +158,9 @@ If so, return number of characters to its beginning; otherwise, nil."
 (defun ess-smart-equals (&optional raw)
   "Insert an R assignment for equal signs preceded by spaces.
 For equal signs not preceded by spaces, as in argument lists,
-just use equals. This can effectively distinguish the two uses
-of equals in every case."
+just use equals.  This can effectively distinguish the two uses
+of equals in every case.  When RAW is non-nil, the equals sign
+is always inserted as is."
   (interactive "P")
   (save-restriction
     (ess-smart-equals--maybe-narrow)
@@ -192,7 +197,7 @@ and otherwise just an '=' is inserted. The specific rules are as follows:
 
   1. In a string or comment or with a non-S language, just insert '='.
   2. If a space (or tab) preceeds the '=', insert a version of `ess-S-assign'
-     with no leading space (e.g., '<- ') so that assignment is surrounded 
+     with no leading space (e.g., '<- ') so that assignment is surrounded
      by at least one space. (Other preceeding spaces are left alone.)
   3. If any of '=<>!' preceed the current '=', insert an '= ', but
      if no space preceeds the preceeding character, insert a space

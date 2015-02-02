@@ -18,9 +18,13 @@ such as '=', but that raises other inconviences because of the multiple
 roles that '=' can play (assignment and default argument setting).
 
 This package gives an alternative smart assignment for R and S code
-that is tied to the '=' key. It works under the assumption that
-binary operators involving '=' will be surrounded by spaces but that
-default argument assignment with '=' **will not**.
+that is tied to the '=' key instead of the '<sub>'</sub> key. It intelligently
+handles the various ways that '=' is used in R (and S) by examining
+the preceding context. It works under the assumption that '=' used
+for default arguments to functions **will not** be surrounded by
+spaces but that binary operators involving '=' *should be*. When
+this is enabled, underscore is completely divorced from assignment
+and thus can be used directly in names.
 
 This package defines a global minor mode `ess-smart-equals-mode`, that
 when enabled for S-language modes causes the '=' key to use the
@@ -49,7 +53,6 @@ in #4 above, the second '=' key is assumed to be intended as an equality
 comparison because the assignment would have been produced by an '='
 following a space.
 
-
 ## Installation
 
 This package is available on [MELPA](http://melpa.org), and you can install it with
@@ -71,7 +74,6 @@ to update your dependencies.
 
 Finally, you can put `ess-smart-equals.el` anywhere on
 your `load-path`.
-
 
 ## Usage
 
@@ -108,7 +110,6 @@ the package `use-package` to :
                      (add-hook 'ess-mode-hook 'ess-smart-equals-mode)
                      (add-hook 'inferior-ess-mode-hook 'ess-smart-equals-mode)))
                 (use-package ess-smart-equals :ensure t)))
-
 
 ## Examples
 

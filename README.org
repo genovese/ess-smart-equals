@@ -18,9 +18,13 @@ such as '=', but that raises other inconviences because of the multiple
 roles that '=' can play (assignment and default argument setting).
 
 This package gives an alternative smart assignment for R and S code
-that is tied to the '=' key. It works under the assumption that
-binary operators involving '=' will be surrounded by spaces but that
-default argument assignment with '=' *will not*.
+that is tied to the '=' key instead of the '_' key. It intelligently
+handles the various ways that '=' is used in R (and S) by examining
+the preceding context. It works under the assumption that '=' used
+for default arguments to functions *will not* be surrounded by
+spaces but that binary operators involving '=' /should be/. When
+this is enabled, underscore is completely divorced from assignment
+and thus can be used directly in names.
 
 This package defines a global minor mode =ess-smart-equals-mode=, that
 when enabled for S-language modes causes the '=' key to use the
