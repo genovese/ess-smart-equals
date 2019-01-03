@@ -74,7 +74,8 @@
 ;;  With a prefix argument, '=' always just inserts an '='.
 ;;
 ;;  By default, the minor mode activates the '=' key, but this can
-;;  be customized with the option `ess-smart-equals-key'.
+;;  be customized by setting the option `ess-smart-equals-key' before
+;;  this package is loaded.
 ;;
 ;;  The function `ess-smart-equals-activate' arranges for the minor mode
 ;;  to be activated by mode hooks for any given list of major modes,
@@ -102,19 +103,17 @@
 ;;
 ;;
 ;;   As a bonus, if `ess-smart-equals-extra-ops' is non-nil when
-;;   this package is loaded, this package also defines some other
-;;   smart operators that may prove useful. If it is set to the
-;;   symbol `bind', then `ess-smart-equals-activate' binds the
-;;   associated electric keys in mode keymaps. Currently, only
-;;   `essmeq-electric-brace' is defined, intended to be bound to
-;;   '{'; it configurably places a properly indented and spaced
+;;   this package is loaded, this package also binds some other
+;;   smart operators that may prove useful. Currently, only
+;;   `ess-smart-equals-open-brace' is defined, intended to be bound
+;;   to '{'; it configurably places a properly indented and spaced
 ;;   matching pair of braces at point or around the region if
-;;   active.
+;;   active. See also `ess-smart-equals-brace-newlines'.
 ;;
 ;;   Finally, the primary user facing functions are named with a
 ;;   prefix `ess-smart-equals-' to avoid conflicts with other
 ;;   packages. Because this is long, the internal functions and
-;;   objects use a shorter (but still distinctive prefix) `essmeq-'.
+;;   objects use a shorter (but still distinctive) prefix `essmeq-'.
 ;;   
 ;;
 ;;  Installation and Initialization
@@ -127,20 +126,21 @@
 ;;  To activate, you need only do
 ;;
 ;;      (require 'ess-smart-equals)
-;;      (ess-smart-equals-mode 1)
+;;      (ess-smart-equals-activate)
 ;;
-;;  somewhere in your init file. For those who use the outstanding
+;;  somewhere in your init file.  and then add `ess-smart-equals-mode' to any
+;;  desired mode hooks. For those who use the outstanding
 ;;  `use-package', you can do
 ;;
 ;;      (use-package ess-smart-equals
-;;        :after (ess-site)
+;;        :after (ess-r-mode)
 ;;        :config (ess-smart-equals-activate))
 ;;
 ;;  somewhere in your init file. An equivalent but less concise version
 ;;  of this is
 ;;
 ;;      (use-package ess-smart-equals
-;;        :after (ess-site)
+;;        :after (ess-r-mode)
 ;;        :hook ((ess-r-mode . ess-smart-equals-mode)
 ;;               (inferior-ess-r-mode . ess-smart-equals-mode)
 ;;               (ess-r-transcript-mode . ess-smart-equals-mode)
@@ -151,7 +151,7 @@
 ;;
 ;;      (use-package ess-smart-equals
 ;;        :init   (setq ess-smart-equals-extra-ops 'bind)
-;;        :after  (ess-site)
+;;        :after  (ess-r-mode)
 ;;        :config (ess-smart-equals-activate))
 ;;
 ;;  Details on customization are provided in the README file.
@@ -177,32 +177,18 @@
 
 (require 'cl-lib)
 (require 'subr-x)
+(require 'map)
 
-(require 'ess-site)
+(require 'ess-r-mode)
 
 
 ;;; Configuration
 
-
-(defvar ess-smart-equals-contexts
-  '((:arglist "=" "==" "%>%")
-    (:index "==" "=" )
-    (:comparison "==" "!=" "<" "<=" ">=" ">" "%in%")
-    (:default "<-" "=" "==" "<<-" "->" "->>" "%<>%"))
-  "Alist mapping context symbols to prioritized lists of operators.
-This should either be set ")
-
 ;; ATTN: Convert to defcustom
-(defvar essmeq--matcher-alist
-  nil
-  "Alist mapping context symbols to operator matchers.
-Do not set this directly")
+(defvar ess-smart-equals-key "="
+  "The key for smart assignment operators when `ess-smart-equals-mode' active.")
 
-;; ATTN: Convert to defcustom
-(defvar essmeq--replace-hook nil
-  "A function called when an operator is replaced by cycling ATTN")
-
-(defun essmeq--reset-matchers (context-alist)
+(defun essmeq--build-matchers (context-alist)
   ""
   (declare (pure t) (side-effect-free t))
   (let (matchers
@@ -217,8 +203,48 @@ Do not set this directly")
                                          data))))
             matchers))))
 
-(defun ess-smart-equals-reset-matchers (context-alist)
-  (setq essmeq--matcher-alist (essmeq--reset-matchers context-alist)))
+;; ATTN: Convert to defcustom
+;; ATTN: No matching context uses default, cdr nil means insert literally
+(defvar ess-smart-equals-contexts
+  '((t (comment)
+       (string)
+       (arglist "=" "==" "%>%")
+       (index "==" "!=" "<=" "<" ">" ">=" "%in%" "=")
+       (comparison "==" "!=" "<=" "<" ">" ">=" "%in%")
+       (t "<-" "=" "==" "<<-" "->" "->>" "%<>%"))
+    (ess-roxy-mode
+     (comment "<-" "=" "==" "<<-" "->" "->>" "%<>%")))
+  "Prioritized lists of operator strings for each context and major mode.
+ATTN: structure
+ATTN: This should not be set directly; use with `ess-smart-equals-set-contexts'
+...")
+
+;; ATTN: Convert to defcustom?
+(defvar ess-smart-equals-context-function nil
+  "If non-nil, a nullary function to calculate the syntactic context at point.
+It should return a symbol corresponding to a context, i.e., one
+of the keys in `ess-smart-equals-contexts', either pre-defined or
+user-defined. Absent any specific context, the function should
+return `t', which is used as a default.")
+
+;; ATTN: Convert to defcustom
+(defvar ess-smart-equals-insertion-hook nil
+  "A function called when an operator is inserted into the current buffer.
+This does not apply in cases when '=' is inserted literally.")
+
+(defvar-local essmeq--matcher-alist  ;; ATTN: set this by mode? or map modes?
+  (essmeq--build-matchers ess-smart-equals-contexts)
+  "Alist mapping context symbols to operator matchers.
+Do not set this directly")
+
+(defun ess-smart-equals-set-contexts (contexts &optional mode)
+  ;; ATTN: handle 'default and mode cases separately
+  ;; ATTN: this is provisional for the moment
+  (if mode
+      (setq essmeq--matcher-alist
+            (essmeq--build-matchers
+             (map-merge 'list (assoc t contexts) (assoc key contexts))))
+    (setq essmeq--matcher-alist (essmeq--build-matchers (assoc t contexts)))))
 
 
 
@@ -339,7 +365,9 @@ which was in turn borrowed from the EIEIO package."
   "Compute context at position POS. ATTN: This is a stub for now"
   (save-excursion
     (when pos (goto-char pos))
-    :default))
+    (if ess-smart-equals-context-function
+        (funcall ess-smart-equals-context-function)
+      t)))
 
 
 ;;; Processing the Action Key
@@ -348,48 +376,11 @@ which was in turn borrowed from the EIEIO package."
   (error "Not yet implemented"))
 
 
-;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;To Be Revised or Deprecated
-
-(defvar ess-smart-equals--last-assign-key
-  ess-smart-S-assign-key
-  "Cached value of previous smart assignment key.")
-
-(defun ess-smart-equals--strip-leading-space (string)
-  "Strip one leading space from STRING, if present."
-  (replace-regexp-in-string "\\` " "" string))
-
-(defun ess-smart-equals--restore-leading-space (string)
-  "Add one leading space to STRING, if none are present."
-  (replace-regexp-in-string "\\`\\(\\S-\\)" " \\1" string))
-
-(defun ess-smart-equals--maybe-narrow ()
-  "Narrow to relevant part of buffer in various ess-related modes."
-  (ignore-errors
-    (when (and (eq major-mode 'inferior-r-ess-mode)
-               (> (point) (process-mark (get-buffer-process (current-buffer)))))
-      (narrow-to-region (process-mark (ess-get-process)) (point-max)))
-    (and (boundp 'ess-noweb-mode)
-         ess-noweb-mode
-         (ess-noweb-in-code-chunk)
-         (ess-noweb-narrow-to-chunk))
-    (and (fboundp 'pm/narrow-to-span)
-         (boundp 'polymode-mode)
-         polymode-mode
-         (pm/narrow-to-span))))
-
-(defun ess-smart-equals--after-assign-p ()
-  "Are we looking backward at `ess-smart-equals-assign-key'?
-If so, return number of characters to its beginning; otherwise, nil."
-  (let ((ess-assign-len (length ess-smart-equals-assign-key)))
-    (when (and (>= (point) (+ ess-assign-len (point-min))) ; enough room back
-               (save-excursion
-                 (backward-char ess-assign-len)
-                 (looking-at-p ess-smart-equals-assign-key)))
-      ess-assign-len)))
+;;; Entry Points
 
 ;;;###autoload
-(defun ess-smart-equals (&optional raw)
-  "Insert, or substitute, a properly-spaced R assignment operator at point.
+(defun ess-smart-equals (&optional literal)
+  "Insert, or substitute, a properly-spaced R (assignment) operator at point.
 If an assignment operator is already present before point, it is replaced
 by the next operator in `ess-smart-equals-operators', taken cyclically.
 The order of these operators is somewhat dependent on context. For instance,
@@ -401,68 +392,35 @@ just use equals.  This can effectively distinguish the two uses
 of equals in every case.  When RAW is non-nil, the equals sign
 is always inserted as is."
   (interactive "P")
-  (save-restriction
-    (ess-smart-equals--maybe-narrow)
-    (let ((prev-char (preceding-char)))
-      (cond
-       ((or raw
-            (not (equal ess-language "S"))
-            (not (string-match-p "[ \t=<>!]" (string prev-char)))
-            (ess-inside-string-or-comment-p (point)))
-        (insert "="))
-       ((string-match-p "[=<>!]" (string prev-char))
-        (when (save-excursion
-                (goto-char (- (point) 2)) ; OK if we go past beginning (ignore-errors (backward-char 2))
-                (not (looking-at-p "[ \t]")))
-          (delete-char -1)
-          (insert " " prev-char))
-        (insert "= "))
-       (t
-        (let ((back-by (ess-smart-equals--after-assign-p)))
-          (if (not back-by)
-              (insert "<- ")
-            (delete-char (- back-by))
-            (insert "== "))))))))
+  (if literal
+      (self-insert-command (if (integerp literal) literal 1))
+    (insert " = "))) ;ATTN: this is obviously wrong
+
+
+;;; Minor Mode
+
+(defvar ess-smart-equals-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map ess-smart-equals-key 'ess-smart-equals)
+    (when ess-smart-equals-extra-ops
+      (define-key map "{" 'ess-smart-equals-open-brace))
+    map)
+  "Keymap used in `ess-smart-equals-mode' binding smart operators.")
 
 ;;;###autoload
 (define-minor-mode ess-smart-equals-mode
-     "Minor mode for setting the '=' key to intelligently handle assignment.
+  "Minor mode for setting the '=' key to intelligently handle assignment.
 
-When enabled for S-language modes, an '=' key uses the preceding character
-to determine the intended construct (assignment, comparison, default argument).
-Loosely, an '=' preceded by a space is converted to an assignment, an '='
-preceded by a comparison (<>!=) becomes a space-padded comparison operator,
-and otherwise just an '=' is inserted. The specific rules are as follows:
-
-  1. In a string or comment or with a non-S language, just insert '='.
-  2. If a space (or tab) preceeds the '=', insert a version of `ess-smart-equals-assign-key'
-     with no leading space (e.g., '<- ') so that assignment is surrounded
-     by at least one space. (Other preceeding spaces are left alone.)
-  3. If any of '=<>!' preceed the current '=', insert an '= ', but
-     if no space preceeds the preceeding character, insert a space
-     so that the resulting binary operator is surrounded by spaces.
-  4. If the `ess-smart-equals-assign-key' string (e.g., '<- ') precedes point,
-     insert '== ' (a double *not* a single equals).
-  5. Otherwise, just insert an '='.
+ATTN
 
 With a prefix argument, '=' always just inserts an '='.
 
-This is a global minor mode that will affect the use of '=' in
-all ess-mode and inferior-ess-mode buffers. A local mode
-may be included in a future version.
-
 Do not set the variable `ess-smart-equals-mode' directly; use the
-function of the same name instead. Also any changes to
-`ess-smart-S-assign-key' while this mode is enabled will have no
-effect and will be lost when the mode is disabled."
-     :lighter nil
-     :require 'ess-site
-     (if (not ess-smart-equals-mode)
-         (progn
-           (define-key ess-r-mode-map ess-smart-equals-assign-key 'self-insert-command)
-           (define-key inferior-ess-r-mode-map ess-smart-equals-assign-key 'self-insert-command)))
-     (define-key ess-r-mode-map ess-smart-equals-assign-key 'ess-smart-equals)
-     (define-key inferior-ess-r-mode-map ess-smart-equals-assign-key 'ess-smart-equals))
+function of the same name instead."
+  :lighter nil
+  :keymap ess-smart-equals-mode-map
+  (when ess-smart-equals-mode
+    (ess-smart-equals-set-contexts ess-smart-equals-contexts major-mode)))
 
 
 (provide 'ess-smart-equals)
