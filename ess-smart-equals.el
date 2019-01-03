@@ -1,6 +1,6 @@
 ;;; ess-smart-equals.el --- better smart-assignment with =-key in R and S  -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2010-2015 Christopher R. Genovese, all rights reserved.
+;; Copyright (C) 2015-2019 Christopher R. Genovese, all rights reserved.
 
 ;; Author: Christopher R. Genovese <genovese@cmu.edu>
 ;; Maintainer: Christopher R. Genovese <genovese@cmu.edu>
@@ -57,7 +57,8 @@
 ;;  context-sensitive completion and cycling of relevant operators.
 ;;  When the mode is active and an '=' is pressed:
 ;;
-;;   1. In a string or comments, just insert '='.
+;;   1. In specified contexts (which for most major modes means
+;;      in strings or comments), just insert '='.
 ;; 
 ;;   2. If an operator relevant to the context lies before point
 ;;      (with optional whitespace), it is replaced, cyclically, by the
@@ -174,9 +175,183 @@
 
 ;;; Code:
 
+(require 'cl-lib)
+(require 'subr-x)
+
 (require 'ess-site)
 
-(defvar ess-smart-equals-assign-key "="
+
+;;; Configuration
+
+
+(defvar ess-smart-equals-contexts
+  '((:arglist "=" "==" "%>%")
+    (:index "==" "=" )
+    (:comparison "==" "!=" "<" "<=" ">=" ">" "%in%")
+    (:default "<-" "=" "==" "<<-" "->" "->>" "%<>%"))
+  "Alist mapping context symbols to prioritized lists of operators.
+This should either be set ")
+
+;; ATTN: Convert to defcustom
+(defvar essmeq--matcher-alist
+  nil
+  "Alist mapping context symbols to operator matchers.
+Do not set this directly")
+
+;; ATTN: Convert to defcustom
+(defvar essmeq--replace-hook nil
+  "A function called when an operator is replaced by cycling ATTN")
+
+(defun essmeq--reset-matchers (context-alist)
+  ""
+  (declare (pure t) (side-effect-free t))
+  (let (matchers
+        (car-or-id (lambda (x) (if (consp x) (car x) x))))
+    (dolist (context context-alist (nreverse matchers))
+      (push (cons (car context)
+                  (essmeq--build-fsm (mapcar car-or-id  (cdr context))
+                                     (let* ((info (cdr context))
+                                            (data (mapcar #'cdr-safe info)))
+                                       (if (cl-every #'null data)
+                                           nil
+                                         data))))
+            matchers))))
+
+(defun ess-smart-equals-reset-matchers (context-alist)
+  (setq essmeq--matcher-alist (essmeq--reset-matchers context-alist)))
+
+
+
+
+;;; Utility Macros
+
+(defmacro essmeq-with-struct-slots (type spec-list inst &rest body)
+  "Execute BODY with vars in SPEC-LIST bound to slots in struct INST of TYPE.
+TYPE is an unquoted symbol corresponding to a type defined by
+`cl-defstruct'. SPEC-LIST is a list, each of whose entries can
+either be a symbol naming both a slot and a variable or a list of
+two symbols (VAR SLOT) associating VAR with the specified SLOT.
+INST is an expression giving a structure of type TYPE as defined
+by `cl-defstruct', and BODY is a list of forms.
+
+This code was based closely on code given at
+www.reddit.com/r/emacs/comments/8pbbpe/why_no_withslots_for_cldefstruct/
+which was in turn borrowed from the EIEIO package."
+  (declare (indent 3) (debug (sexp sexp sexp def-body)))
+  (let ((obj (make-symbol "struct")))
+    `(let ((,obj ,inst))
+       (cl-symbol-macrolet  ;; each spec => a symbol macro to an (aref ....)
+           ,(mapcar (lambda (entry)
+                      (let* ((slot-var  (if (listp entry) (car entry) entry))
+			     (slot (if (listp entry) (cadr entry) entry))
+			     (idx (cl-struct-slot-offset type slot)))
+                        (list slot-var `(aref ,obj ,idx))))
+                    spec-list)
+         (unless (cl-typep ,obj ',type)
+	   (error "%s is not of type %s" ',inst ',type))
+         ,(if (cdr body) `(progn ,@body) (car body))))))
+
+
+;;; Finite-State Machine for Operator Matching
+;;
+;;  
+
+(cl-defstruct (essmeq-matcher
+               (:constructor nil)
+               (:constructor essmeq--make-matcher
+                             (strings
+                              &key
+                              (fsm (make-vector
+                                    (1+ (apply #'+ (mapcar #'length strings)))
+                                    nil))
+                              (span (apply #'max (mapcar #'length strings)))
+                              (info (make-vector (length strings) nil))
+                              &aux
+                              (targets (vconcat strings))
+                              (data (vconcat info))))
+               (:copier essmeq--copy-matcher)
+               (:predicate essmeq--matcher-p))
+  fsm targets span data)  ;; ATTN: need to add prefix table
+
+(defun essmeq--build-fsm (ops &optional data)
+  "Build backward matching finite-state machine for string vector OPS."
+  (declare (pure t) (side-effect-free t))
+  (let ((fsm (make-vector (1+ (apply #'+ (mapcar #'length ops))) nil))
+        (next-state 1) ;; start state 0 always exists
+        (max-len 0)
+        (num-ops (length ops))
+        (op-index 0))
+    (while (< op-index num-ops)
+      (let* ((state 0)
+             (op (elt ops op-index))
+             (len (length op))
+             (ind (1- len)))
+        (when (> len max-len)
+          (setq max-len len))
+        (while (> ind 0)
+          (if-let* ((ch (aref op ind))
+                    (in-state (aref fsm state))
+                    (goto (assoc ch in-state)))
+              (setq state (cadr goto))
+            (push (list* ch next-state nil) (aref fsm state))
+            (setq state next-state
+                  next-state (1+ next-state)))
+          (setq ind (1- ind)))
+        (if-let* ((ch (aref op 0))
+                  (in-state (aref fsm state))
+                  (goto (assoc ch in-state)))
+            (setf (cddr goto) op-index)
+          (push (list* ch next-state op-index) (aref fsm state))
+          (setq next-state (1+ next-state))))
+      (setq op-index (1+ op-index)))
+    (essmeq--make-matcher ops
+                          :fsm (cl-map 'vector #'nreverse
+                                       (substring fsm 0 next-state))
+                          :span max-len
+                          :info (if data (vconcat data) nil))))
+
+(defun essmeq--match (fsm &optional pos bound)
+  "FSM parsing backward from POS, assumes whitespace handled elsewhere"
+  (let ((pos (or pos (point)))
+        (limit (or bound (point-min)))
+        (state 0)
+        (accepted nil)
+        (start pos))
+    (while (and (not (eq state :fail)) (>= start limit))
+      (if-let (next (assoc (char-before start) (aref fsm state)))
+          (setq state (cadr next)
+                accepted (cddr next)
+                start (1- start))
+        (setq state :fail)))
+    (if accepted
+        (cl-list* accepted start pos)
+      nil)))
+
+(defun essmeq--complete (fsm &optional pos bound)
+  "ATTN: complete using prefix table when implemented"
+  nil
+  )
+
+
+;;; Contexts 
+
+(defun essmeq--context (&optional pos)
+  "Compute context at position POS. ATTN: This is a stub for now"
+  (save-excursion
+    (when pos (goto-char pos))
+    :default))
+
+
+;;; Processing the Action Key
+
+(defun essmeq--process (&optional initial-pos)
+  (error "Not yet implemented"))
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;To Be Revised or Deprecated
+
+(defvar ess-smart-equals--last-assign-key
+  ess-smart-S-assign-key
   "Cached value of previous smart assignment key.")
 
 (defun ess-smart-equals--strip-leading-space (string)
