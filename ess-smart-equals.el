@@ -6,9 +6,9 @@
 ;; Maintainer: Christopher R. Genovese <genovese@cmu.edu>
 ;; Keywords: R, S, ESS, convenience
 ;; URL: https://github.com/genovese/ess-smart-equals
-;; Version: 0.2.1
-;; Package-Version: 0.2.1
-;; Package-Requires: ((emacs "24") (ess "5.00"))
+;; Version: 0.2.0
+;; Package-Version: 0.2.0
+;; Package-Requires: ((emacs "25") (ess "16.10"))
 
 
 ;;; License:
@@ -32,93 +32,145 @@
 
 ;;; Commentary:
 ;;
-;;  Assignment in R is syntactically complicated by three features: 1. the
-;;  historical role of '_' (underscore) as an assignment character in
-;;  the S language (SPlus may still allow this); 2. the somewhat
+;;  Assignment in R is syntactically complicated by a few features:
+;;  1. the historical role of '_' (underscore) as an assignment
+;;  character in the S language; 2. the somewhat
 ;;  inconvenient-to-type, if conceptually pure, '<-' operator as the
-;;  preferred assignment operator; and 3. the ability to use either
-;;  an '=' or an '<-' for assignment.
+;;  preferred assignment operator; 3. the ability to use either an
+;;  '=' or an '<-' for assignment; and 4. the multiple roles that
+;;  '=' can play, including for setting named arguments in a
+;;  function call.
 ;;
-;;  ESS uses '_' as a (default) smart assignment character which expands
-;;  to the '<-' with one invokation and gives an underscore on two.
-;;  This makes it rather painful to use underscores in variable, field,
-;;  and function names. Moreover, _ no longer has any association with
-;;  assignment in R, so the mnemonic is strained.
+;;  This package gives an alternative smart assignment operator for
+;;  R (i.e., S) code that is tied to the '=' key; in fact, it
+;;  handles assignment and comparison operators as well as named
+;;  argument setting. It uses context in the code to intelligently
+;;  guess which operator is intended and then allows very easy
+;;  cycling through the possible operators. The contexts and the
+;;  operators that are cycled through in each context are
+;;  customizable.
 ;;
-;;  It is possible to reassign the special underscore to another character,
-;;  such as '=', but that raises other inconviences because of the multiple
-;;  roles that '=' can play (assignment and default argument setting).
+;;  The package defines a minor mode `ess-smart-equals-mode',
+;;  intended for S-language modes (e.g., ess-r-mode,
+;;  inferior-ess-r-mode, and ess-r-transcript-mode), that when
+;;  enabled in a buffer activates the '=' key to to handle
+;;  context-sensitive completion and cycling of relevant operators.
+;;  When the mode is active and an '=' is pressed:
 ;;
-;;  This package gives an alternative smart assignment for R and S code
-;;  that is tied to the '=' key instead of the '_' key. It intelligently
-;;  handles the various ways that '=' is used in R (and S) by examining
-;;  the preceding context. It works under the assumption that '=' used
-;;  for default arguments to functions *will not* be surrounded by
-;;  spaces but that binary operators involving '=' /should be/. When
-;;  this is enabled, underscore is completely divorced from assignment
-;;  and thus can be used directly in names.
+;;   1. In a string or comments, just insert '='.
+;; 
+;;   2. If an operator relevant to the context lies before point
+;;      (with optional whitespace), it is replaced, cyclically, by the
+;;      next operator in the configured list for that context.
 ;;
-;;  This package defines a global minor mode `ess-smart-equals-mode', that
-;;  when enabled for S-language modes causes the '=' key to use the
-;;  preceding character to determine the intended construct (assignment,
-;;  comparison, default argument). Loosely speaking, an '=' preceded by a
-;;  space is converted to an assignment, an '=' preceded by a comparison
-;;  character (<>!=) becomes a space-padded comparison operator, and
-;;  otherwise just an '=' is inserted. The specific rules are as follows:
+;;   3. Otherwise, if a prefix of an operator relevant to the
+;;      context lies before point, that operator is completed.
 ;;
-;;   1. In a string or comment or with a non-S language, just insert '='.
-;;   2. If a space (or tab) preceeds the '=', insert a version of
-;;      `ess-smart-equals-assign-key' with no leading space (e.g., "<- ").
-;;      (Other preceeding spaces are left alone.)
-;;   3. If any of =<>! preceed the current '=', insert an '= ', but
-;;      if no space preceeds the preceeding character, insert a space
-;;      so that the resulting binary operator is surrounded by spaces.
-;;   4. If the `ess-smart-equals-assign-key' string (e.g., "<- ") precedes
-;;      point, insert '== ' (a double *not* a single equals).
-;;   5. Otherwise, just insert an '='.
+;;   4. Otherwise, the highest priority relevant operator is inserted
+;;      with surrounding whitespace (see `ess-smart-equals-no-spaces').
 ;;
+;;  Consecutive presses of '=' cycle through the relevant operators.
 ;;  With a prefix argument, '=' always just inserts an '='.
 ;;
-;;  These insertions ensure that binary operators have a space on either
-;;  end but they do not otherwise adjust spacing on either side. Note that
-;;  in #4 above, the second '=' key is assumed to be intended as an equality
-;;  comparison because the assignment would have been produced by an '='
-;;  following a space.
+;;  By default, the minor mode activates the '=' key, but this can
+;;  be customized with the option `ess-smart-equals-key'.
 ;;
-;;  Examples: In the left column below, ^ marks the location at which an '='
-;;  key is pressed, and in the right column it marks the resulting
+;;  The function `ess-smart-equals-activate' arranges for the minor mode
+;;  to be activated by mode hooks for any given list of major modes,
+;;  defaulting to ESS major modes associated with R (ess-r-mode,
+;;  inferior-ess-r-mode, ess-r-transcript-mode, ess-roxy-mode). 
+;;
+;;  Examples
+;;  --------
+;;  In the left column below, ^ marks the location at which an '='
+;;  key is pressed, the remaining columns show the result of
+;;  consecutive presses of '=' using the package's default settings.
 ;;  position of point.
 ;;
-;;     Before '='         After '='
-;;     ----------         ---------
-;;     foo ^              foo <- ^
-;;     foo     ^          foo     <- ^
-;;     foo(a^             foo(a=^
-;;     foo=^              foo == ^
-;;     foo<^              foo <= ^
-;;     "foo ^             "foo =^
-;;     #...foo ^          #...foo =^
-;;     foo <- ^           foo == ^
+;;     Before '='         Press '='      Another '='       Another '='
+;;     ----------         ---------      -----------       -----------
+;;     foo^               foo <- ^       foo <<- ^         foo = ^
+;;     foo  ^             foo  <- ^      foo  <<- ^        foo  = ^
+;;     foo<^              foo <- ^       foo <<- ^         foo = ^
+;;     foo=^              foo = ^        foo -> ^          foo ->> ^
+;;     foo(a^             foo(a = ^      foo( a == ^       foo( a != ^
+;;     if( foo=^          if( foo == ^   if( foo != ^      if( foo <= ^
+;;     if( foo<^          if( foo < ^    if( foo > ^       if( foo >= ^
+;;     "foo ^             "foo =^        "foo ==^          "foo ===^
+;;     #...foo ^          #...foo =^     #...foo ==^       #...foo ===^
 ;;
 ;;
-;;  Installation
-;;  ------------
-;;  Either put this file on your load path
-;;  Disabling the minor mode restores (as well as possible) the previous
-;;  ESS assignment setup.
+;;   As a bonus, if `ess-smart-equals-extra-ops' is non-nil when
+;;   this package is loaded, this package also defines some other
+;;   smart operators that may prove useful. If it is set to the
+;;   symbol `bind', then `ess-smart-equals-activate' binds the
+;;   associated electric keys in mode keymaps. Currently, only
+;;   `essmeq-electric-brace' is defined, intended to be bound to
+;;   '{'; it configurably places a properly indented and spaced
+;;   matching pair of braces at point or around the region if
+;;   active.
 ;;
+;;   Finally, the primary user facing functions are named with a
+;;   prefix `ess-smart-equals-' to avoid conflicts with other
+;;   packages. Because this is long, the internal functions and
+;;   objects use a shorter (but still distinctive prefix) `essmeq-'.
+;;   
+;;
+;;  Installation and Initialization
+;;  -------------------------------
+;;  The package can be loaded from MELPA using `package-install' or another
+;;  Emacs package manager. Alternatively, you can clone or download the source
+;;  directly from the github repository and put the file `ess-smart-equals.el'
+;;  in your Emacs load path.
+;;
+;;  To activate, you need only do
+;;
+;;      (require 'ess-smart-equals)
+;;      (ess-smart-equals-mode 1)
+;;
+;;  somewhere in your init file. For those who use the outstanding
+;;  `use-package', you can do
+;;
+;;      (use-package ess-smart-equals
+;;        :after (ess-site)
+;;        :config (ess-smart-equals-activate))
+;;
+;;  somewhere in your init file. An equivalent but less concise version
+;;  of this is
+;;
+;;      (use-package ess-smart-equals
+;;        :after (ess-site)
+;;        :hook ((ess-r-mode . ess-smart-equals-mode)
+;;               (inferior-ess-r-mode . ess-smart-equals-mode)
+;;               (ess-r-transcript-mode . ess-smart-equals-mode)
+;;               (ess-roxy-mode . ess-smart-equals-mode))
+;;               
+;;  To also activate the smart brace operator and bind it to '{'
+;;  automatically, you can replace this with
+;;
+;;      (use-package ess-smart-equals
+;;        :init   (setq ess-smart-equals-extra-ops 'bind)
+;;        :after  (ess-site)
+;;        :config (ess-smart-equals-activate))
+;;
+;;  Details on customization are provided in the README file.
+;;  
 
 ;;; Change Log:
 ;;
-;;  0.2.2 -- Fix for deprecated ESS variables `ess-S-assign' and
-;;           `ess-smart-S-assign-key'. Thanks to Daniel Gomez (@dangom).
-;;
-;;  0.2.1 -- Initial release with simple insertion and completion, with
-;;           space padding for the operators except for a single '='
+;;  0.2.0 -- Breaking changes in functionality, design, and configuration.
+;;           No longer relies on `ess-S-assign' which was deprecated in
+;;           ESS. Now provides more powerful context-sensitive, prioritized
+;;           operator lists with cycling and completion. The mode is now,
+;;           properly, a local minor mode, which can be added automatically
+;;           to relevant mode hooks for ESS R modes. Updated required
+;;           versions of emacs and ESS.
+;;           
+;;  0.1.1 -- Initial release with simple insertion and completion, with
+;;           space padding for the operators except for a single '=' 
 ;;           used to specify named arguments in function calls. Relies on
 ;;           ESS variables `ess-S-assign' and `ess-smart-S-assign-key'
 ;;           to specify preferred operator for standard assignments.
-
 
 ;;; Code:
 
@@ -162,7 +214,13 @@ If so, return number of characters to its beginning; otherwise, nil."
 
 ;;;###autoload
 (defun ess-smart-equals (&optional raw)
-  "Insert an R assignment for equal signs preceded by spaces.
+  "Insert, or substitute, a properly-spaced R assignment operator at point.
+If an assignment operator is already present before point, it is replaced
+by the next operator in `ess-smart-equals-operators', taken cyclically.
+The order of these operators is somewhat dependent on context. For instance,
+in the argument list of a function call, a single `=' is first rather 
+than the standard `<-'; spacing in this case is also determined by
+the value of `ess-smart-equals-space-named-arguments'.
 For equal signs not preceded by spaces, as in argument lists,
 just use equals.  This can effectively distinguish the two uses
 of equals in every case.  When RAW is non-nil, the equals sign
