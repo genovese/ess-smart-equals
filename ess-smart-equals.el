@@ -182,11 +182,45 @@
 (require 'ess-r-mode)
 
 
-;;; Configuration
+;;; Key Configuration and Utilities
 
 ;; ATTN: Convert to defcustom
 (defvar ess-smart-equals-key "="
   "The key for smart assignment operators when `ess-smart-equals-mode' active.")
+
+;; ATTN: Convert to defcustom
+(defvar ess-smart-equals-cancel-keys (list (kbd "C-g")
+                                           (kbd "backspace")
+                                           (kbd "DEL"))
+  "List of keys transiently bound to cancel operator insertion or cycling.")
+;; ATTN: ^^ don't set this directly, use customize or ... function
+
+(defvar essmeq--transient-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
+    (dolist (key ess-smart-equals-cancel-keys)
+      (define-key map key #'essmeq--remove))
+    map)
+  "Map bound transiently after `ess-smart-equals' to ATTN")
+
+(defun essmeq--clear-transient ()
+  (equal (this-command-keys-vector) (vconcat ess-smart-equals-key)))
+
+
+;;; Behavior Configuration 
+
+;; ATTN: Convert to defcustom
+(defvar ess-smart-equals-insertion-hook nil
+  "A function called when an operator is inserted into the current buffer.
+This does not apply in cases when '=' is inserted literally.")
+
+;; ATTN: Convert to defcustom
+(defvar ess-smart-equals-default-modes
+  '(ess-r-mode inferior-ess-r-mode ess-r-transcript-mode ess-roxy-mode)
+  "List of major modes where `ess-smart-equals-activate' binds '=' by default.")
+
+
+;;; Context and Matcher Configuration and Utilities
 
 (defun essmeq--build-matchers (context-alist)
   ""
@@ -210,7 +244,7 @@
        (string)
        (arglist "=" "==" "%>%")
        (index "==" "!=" "<=" "<" ">" ">=" "%in%" "=")
-       (comparison "==" "!=" "<=" "<" ">" ">=" "%in%")
+       (conditional "==" "!=" "<=" "<" ">" ">=" "%in%")
        (t "<-" "=" "==" "<<-" "->" "->>" "%<>%"))
     (ess-roxy-mode
      (comment "<-" "=" "==" "<<-" "->" "->>" "%<>%")))
@@ -226,11 +260,6 @@ It should return a symbol corresponding to a context, i.e., one
 of the keys in `ess-smart-equals-contexts', either pre-defined or
 user-defined. Absent any specific context, the function should
 return `t', which is used as a default.")
-
-;; ATTN: Convert to defcustom
-(defvar ess-smart-equals-insertion-hook nil
-  "A function called when an operator is inserted into the current buffer.
-This does not apply in cases when '=' is inserted literally.")
 
 (defvar-local essmeq--matcher-alist  ;; ATTN: set this by mode? or map modes?
   (essmeq--build-matchers (map-elt ess-smart-equals-contexts t))
@@ -365,17 +394,31 @@ which was in turn borrowed from the EIEIO package."
     (when pos (goto-char pos))
     (if ess-smart-equals-context-function
         (funcall ess-smart-equals-context-function)
-      t)))
+      (cond
+       ((ess-inside-comment-p)  'comment)
+       ((ess-inside-string-p)   'string)
+       ((ess-inside-brackets-p) 'index)
+       ((ess-inside-call-p)
+        (if (save-excursion
+              (goto-char (ess-containing-sexp-position))
+              (or (ess-climb-call-name "if")
+                  (ess-climb-call-name "while")))
+            'conditional
+          'arglist))
+       (t)))))
 
 
 ;;; Processing the Action Key
+
+(defun essmeq--after-whitespace-p (&optional pos)
+  (eq (char-syntax (char-before pos)) ?\ ))
 
 (defun essmeq--replace-region (text start end &optional padding)
   (save-excursion
     (goto-char start)
     (delete-region start end)
     (let ((padding (or padding "")))
-        (insert padding text padding))))
+      (insert padding text padding))))
 
 (defun essmeq--process (&optional initial-pos)
   (let* ((pos0 (or initial-pos (point)))
@@ -387,23 +430,83 @@ which was in turn borrowed from the EIEIO package."
     ;; code below assumes point, should we drop initial-pos, or handle it below
     (essmeq-with-struct-slots essmeq-matcher (fsm targets span) matcher
       (pcase-let ((`(,accepted ,start . ,pos1)
-                   (essmeq--match fsm pos (- pos span))))
+                   (essmeq--match fsm pos (- pos span)))
+                  (num-ops (length targets)))
         (if accepted
-            (let* ((op (mod (1+ accepted) (length targets)))
+            (let* ((op (mod (1+ accepted) num-ops))
                    (op-string (aref targets op))
-                   (ws-start (if (eq (char-syntax (char-before start)) ?\ )
+                   (ws-start (if (essmeq--after-whitespace-p start)
                                  (1- start)
                                start)))
               (insert " ") ;; if point at point-max end up wrongly positioned
               (essmeq--replace-region op-string ws-start pos0 " ");; ATTN: configure padding
               (delete-char -1)) 
           ;; ATTN: add completion but for now just insert
-          (insert " ")
-          (essmeq--replace-region (aref targets 0) pos pos0 " ")
-          (delete-char -1))))))
+          (if (zerop num-ops)
+              (insert "=")
+            (insert " ")
+            (essmeq--replace-region (aref targets 0) pos pos0 " ")
+            (delete-char -1)))))))
+
+(defun essmeq--remove (&optional initial-pos)
+  (interactive)
+  (let* ((pos0 (or initial-pos (point)))
+         (pos (save-excursion
+                (when initial-pos (goto-char pos0))
+                (+ pos0 (skip-syntax-backward " "))))
+         (context (essmeq--context pos0))
+         (matcher (map-elt essmeq--matcher-alist context))) 
+    ;; code below assumes point, should we drop initial-pos, or handle it below
+    (essmeq-with-struct-slots essmeq-matcher (fsm targets span) matcher
+      (pcase-let ((`(,accepted ,start . ,pos1)
+                   (essmeq--match fsm pos (- pos span))))
+        (when accepted
+            (let ((ws-start (if (essmeq--after-whitespace-p start)
+                                (1- start)
+                              start))
+                  (ws-end (if (essmeq--after-whitespace-p (1+ pos1))
+                              (1+ pos1)
+                            pos1)))
+              (essmeq--replace-region "" ws-start ws-end)))))))
+
+(defun essmeq--selected (op-string &optional initial-pos)
+  (interactive (list (completing-read "Operator: "
+                                      (thread-last ess-smart-equals-contexts
+                                        (alist-get t)
+                                        (mapcar #'cdr)
+                                        (apply #'append)
+                                        delete-dups))))
+  ;;ATTN:incomplete, to bind to tab in transient map
+  op-string)
 
 
 ;;; Entry Points
+
+;;;###autoload
+(defun ess-smart-equals-activate (&rest active-modes)
+  "Turn on `ess-smart-equals-mode' in current and future buffers of ACTIVE-MODES.
+If non-nil, each entry of ACTIVE-MODES is either a major-mode
+symbol or a list of two symbols (major-mode major-mode-hook). In
+the former case, the hook symbol is constructed by adding
+\"-hook\" to the major mode symbol name. If ACTIVE-MODES is nil,
+the specification in `ess-smart-equals-default-modes' is used
+instead.
+
+This adds to each specified major-mode hook a function that will
+enable `ess-smart-equals-mode' and also enables the minor mode in
+all current buffers whose major mode is one of the major modes
+just described."
+  (interactive)
+  (dolist (mode-spec (or active-modes ess-smart-equals-default-modes))
+    (let ((mode (if (listp mode-spec) (car mode-spec) mode-spec))
+          (hook (if (listp mode-spec)
+                    (cdr mode-spec)
+                  (intern (concat (symbol-name mode) "-hook")))))
+      (add-hook hook #'ess-smart-equals-mode)
+      (dolist (buf (buffer-list))
+        (with-current-buffer buf
+          (when (derived-mode-p mode)
+            (ess-smart-equals-mode 1)))))))
 
 ;;;###autoload
 (defun ess-smart-equals (&optional literal)
@@ -421,7 +524,10 @@ is always inserted as is."
   (interactive "P")
   (if literal
       (self-insert-command (if (integerp literal) literal 1))
-    (essmeq--process))) ;ATTN: this is not quite there
+    ;; ATTN: what's missing here?
+    (essmeq--process)
+    (unless (eq last-command this-command)
+      (set-transient-map essmeq--transient-map #'essmeq--clear-transient)))) 
 
 
 ;;; Minor Mode
