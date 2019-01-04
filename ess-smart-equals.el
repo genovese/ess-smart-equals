@@ -233,7 +233,7 @@ return `t', which is used as a default.")
 This does not apply in cases when '=' is inserted literally.")
 
 (defvar-local essmeq--matcher-alist  ;; ATTN: set this by mode? or map modes?
-  (essmeq--build-matchers ess-smart-equals-contexts)
+  (essmeq--build-matchers (map-elt ess-smart-equals-contexts t))
   "Alist mapping context symbols to operator matchers.
 Do not set this directly")
 
@@ -243,10 +243,8 @@ Do not set this directly")
   (if mode
       (setq essmeq--matcher-alist
             (essmeq--build-matchers
-             (map-merge 'list (assoc t contexts) (assoc key contexts))))
-    (setq essmeq--matcher-alist (essmeq--build-matchers (assoc t contexts)))))
-
-
+             (map-merge 'list (map-elt contexts t) (map-elt contexts key))))
+    (setq essmeq--matcher-alist (essmeq--build-matchers (map-elt contexts t)))))
 
 
 ;;; Utility Macros
@@ -290,7 +288,7 @@ which was in turn borrowed from the EIEIO package."
                               (fsm (make-vector
                                     (1+ (apply #'+ (mapcar #'length strings)))
                                     nil))
-                              (span (apply #'max (mapcar #'length strings)))
+                              (span (apply #'max 0 (mapcar #'length strings)))
                               (info (make-vector (length strings) nil))
                               &aux
                               (targets (vconcat strings))
@@ -338,11 +336,11 @@ which was in turn borrowed from the EIEIO package."
 
 (defun essmeq--match (fsm &optional pos bound)
   "FSM parsing backward from POS, assumes whitespace handled elsewhere"
-  (let ((pos (or pos (point)))
-        (limit (or bound (point-min)))
-        (state 0)
-        (accepted nil)
-        (start pos))
+  (let* ((pos (or pos (point)))
+         (limit (or bound (point-min)))
+         (state 0)
+         (accepted nil)
+         (start pos))
     (while (and (not (eq state :fail)) (>= start limit))
       (if-let (next (assoc (char-before start) (aref fsm state)))
           (setq state (cadr next)
@@ -372,8 +370,37 @@ which was in turn borrowed from the EIEIO package."
 
 ;;; Processing the Action Key
 
+(defun essmeq--replace-region (text start end &optional padding)
+  (save-excursion
+    (goto-char start)
+    (delete-region start end)
+    (let ((padding (or padding "")))
+        (insert padding text padding))))
+
 (defun essmeq--process (&optional initial-pos)
-  (error "Not yet implemented"))
+  (let* ((pos0 (or initial-pos (point)))
+         (pos (save-excursion
+                (when initial-pos (goto-char pos0))
+                (+ pos0 (skip-syntax-backward " "))))
+         (context (essmeq--context pos0))
+         (matcher (map-elt essmeq--matcher-alist context))) 
+    ;; code below assumes point, should we drop initial-pos, or handle it below
+    (essmeq-with-struct-slots essmeq-matcher (fsm targets span) matcher
+      (pcase-let ((`(,accepted ,start . ,pos1)
+                   (essmeq--match fsm pos (- pos span))))
+        (if accepted
+            (let* ((op (mod (1+ accepted) (length targets)))
+                   (op-string (aref targets op))
+                   (ws-start (if (eq (char-syntax (char-before start)) ?\ )
+                                 (1- start)
+                               start)))
+              (insert " ") ;; if point at point-max end up wrongly positioned
+              (essmeq--replace-region op-string ws-start pos0 " ");; ATTN: configure padding
+              (delete-char -1)) 
+          ;; ATTN: add completion but for now just insert
+          (insert " ")
+          (essmeq--replace-region (aref targets 0) pos pos0 " ")
+          (delete-char -1))))))
 
 
 ;;; Entry Points
@@ -394,7 +421,7 @@ is always inserted as is."
   (interactive "P")
   (if literal
       (self-insert-command (if (integerp literal) literal 1))
-    (insert " = "))) ;ATTN: this is obviously wrong
+    (essmeq--process))) ;ATTN: this is not quite there
 
 
 ;;; Minor Mode
