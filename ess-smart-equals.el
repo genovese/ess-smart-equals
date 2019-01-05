@@ -319,17 +319,19 @@ which was in turn borrowed from the EIEIO package."
                                     nil))
                               (span (apply #'max 0 (mapcar #'length strings)))
                               (info (make-vector (length strings) nil))
+                              (partial nil)
                               &aux
                               (targets (vconcat strings))
                               (data (vconcat info))))
                (:copier essmeq--copy-matcher)
                (:predicate essmeq--matcher-p))
-  fsm targets span data)  ;; ATTN: need to add prefix table
+  fsm targets span data partial)
 
 (defun essmeq--build-fsm (ops &optional data)
   "Build backward matching finite-state machine for string vector OPS."
   (declare (pure t) (side-effect-free t))
   (let ((fsm (make-vector (1+ (apply #'+ (mapcar #'length ops))) nil))
+        (partial nil)
         (next-state 1) ;; start state 0 always exists
         (max-len 0)
         (num-ops (length ops))
@@ -345,26 +347,43 @@ which was in turn borrowed from the EIEIO package."
           (if-let* ((ch (aref op ind))
                     (in-state (aref fsm state))
                     (goto (assoc ch in-state)))
-              (setq state (cadr goto))
-            (push (list* ch next-state nil) (aref fsm state))
+              (setq state (cadr goto)) ; transition exists, follow it 
+            (push (list* ch next-state nil) (aref fsm state)) ; new state
+            (when (> state 0)
+              (push (cons state (- len ind 1)) (map-elt partial ch))) ; goto for partial match
             (setq state next-state
                   next-state (1+ next-state)))
           (setq ind (1- ind)))
         (if-let* ((ch (aref op 0))
                   (in-state (aref fsm state))
                   (goto (assoc ch in-state)))
-            (setf (cddr goto) op-index)
-          (push (list* ch next-state op-index) (aref fsm state))
+            (setf (cddr goto) op-index) ; transition exists, accept it
+          (push (list* ch next-state op-index) (aref fsm state)) ; new accept
+          (when (> state 0)
+              (push (cons state (- len 1)) (map-elt partial ch))) ; goto for partial match
           (setq next-state (1+ next-state))))
       (setq op-index (1+ op-index)))
     (essmeq--make-matcher ops
                           :fsm (cl-map 'vector #'nreverse
                                        (substring fsm 0 next-state))
                           :span max-len
-                          :info (if data (vconcat data) nil))))
+                          :info (if data (vconcat data) nil)
+                          :partial (mapcar (lambda (x)
+                                             (cl-callf reverse (cdr x))
+                                             x)
+                                           (nreverse partial)))))
 
 (defun essmeq--match (fsm &optional pos bound)
-  "FSM parsing backward from POS, assumes whitespace handled elsewhere"
+  "Search backward to exactly match a string specified by machine FSM.
+Anchor the search at POS, or at point if nil. BOUND, if non-nil,
+limits the search to positions not before position BOUND. Assumes
+that surrounding whitespace is handled elsewhere.
+
+Return a dotted list of the form (ACCEPT START . POS) if a match
+exists, or nil otherwise. ACCEPT is the number of the accepting
+state in FSM, START is the position of the matching string's
+beginning, and POS is the position where scanning started, as
+passed to this function."
   (let* ((pos (or pos (point)))
          (limit (or bound (point-min)))
          (state 0)
@@ -378,6 +397,58 @@ which was in turn borrowed from the EIEIO package."
         (setq state :fail)))
     (if accepted
         (cl-list* accepted start pos)
+      nil)))
+
+(defun essmeq--partial-match (fsm partial &optional pos bound)
+  "Search backward for farthest partial match to a string specified by FSM.
+A partial match is a prefix of one of the target operators; the
+`farthest' match is the one that moves the position as far back
+as possible. Note that this respects the priority order only for
+equally far matches.
+
+FSM is the finite-state machine from an `essmeq-matcher'; PARTIAL
+is an alist mapping characters to a list of (STATE . SLEN) pairs,
+where STATE represents a state to jump to for partial match from POS
+and SLEN is the length of the omitted suffix for that partial match.
+The search is anchored at POS, or at point if nil. BOUND, if non-nil,
+limits the search to positions not before position BOUND. Assumes
+that surrounding whitespace is handled elsewhere. 
+
+Return a dotted list of the form (ACCEPT SLEN START . POS) if a
+match exists, or nil otherwise. ACCEPT is the number of the
+accepting state in FSM, SLEN is the length of the missing suffix
+in the partially matched string (0 for full match), START is the
+position of the matching string's beginning, and POS is the
+position where scanning started, as passed to this function."
+  (let* ((pos (or pos (point)))
+         (limit (or bound (point-min)))
+         (start pos)
+         (ch0 (char-before start))
+         (skip (copy-sequence (map-elt partial ch0)))
+         (state (caar skip))
+         (slen (cdar skip))
+         (accepted nil)
+         (farthest-start (1+ start))
+         (farthest-slen 0))
+    (when skip
+      (pop skip)
+      (while (and (not (eq state :fail)) (>= start limit))
+        (if-let (next (assoc (char-before start) (aref fsm state)))
+            (let ((acc* (cddr next))
+                  (farther (< start farthest-start)))
+              (when (and acc* farther)
+                (setq accepted acc*
+                      farthest-start start
+                      farthest-slen slen))
+              (setq state (cadr next)
+                    start (1- start)))
+          (if-let ((jump (pop skip)))
+              (setq state (car jump)
+                    slen (cdr jump)
+                    start pos)
+            (setq state :fail)))))
+    (if accepted
+        (cl-list* accepted farthest-slen farthest-start pos)
       nil)))
 
 (defun essmeq--complete (fsm &optional pos bound)
