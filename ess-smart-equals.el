@@ -184,40 +184,98 @@
 
 ;;; Key Configuration and Utilities
 
-;; ATTN: Convert to defcustom
 (defvar ess-smart-equals-key "="
-  "The key for smart assignment operators when `ess-smart-equals-mode' active.")
+  "The key for smart assignment operators when `ess-smart-equals-mode' active.
 
-;; ATTN: Convert to defcustom
-(defvar ess-smart-equals-cancel-keys (list (kbd "C-g")
-                                           (kbd "backspace")
-                                           (kbd "DEL"))
-  "List of keys transiently bound to cancel operator insertion or cycling.")
-;; ATTN: ^^ don't set this directly, use customize or ... function
+This should either be changed through the customization facility
+or before the package is loaded because it affects several
+keymaps used by the minor mode."
+  :group 'ess-edit
+  :type 'string
+  :set (lambda (sym value)
+         (set-default sym value)
+         (setq essmeq--transient-map (essmeq--make-transient-map))
+         (define-key ess-smart-equals-mode-map ess-smart-equals-key nil)
+         (define-key ess-smart-equals-mode-map value 'ess-smart-equals)))
 
-(defvar essmeq--transient-map
+(defcustom ess-smart-equals-cancel-keys (list [backspace]
+                                              (kbd "<DEL>")
+                                              (kbd "C-g"))
+  "List of keys transiently bound to cancel operator insertion or cycling.
+Except for C-g, a shifted version of each will instead delete backwards a 
+character, making it easy to delete only part of an operator if desired.
+
+This should either be changed through the customization facility
+or before the package is loaded because it affects several
+keymaps used by the minor mode."
+  :group 'ess-edit
+  :type '(repeat (choice string (restricted-sexp :match-alternatives (vectorp))))
+  :set (lambda (sym value)
+         (set-default sym value)
+         (setq essmeq--transient-map (essmeq--make-transient-map))))
+
+(defun essmeq--make-transient-map ()
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
     (dolist (key ess-smart-equals-cancel-keys)
-      (define-key map key #'essmeq--remove))
-    map)
-  "Map bound transiently after `ess-smart-equals' to ATTN")
+      (define-key map key #'essmeq--remove)
+      (when (and (or (stringp key) (vectorp key))
+                 (= (length key) 1)
+                 (not (eq (aref key 0) 7))) ;; Skip C-g
+        (define-key map ;; make shift-cancel just do regular backspace
+          (vector (if (listp (aref key 0))
+                      (cons 'shift (aref key 0))
+                    (list 'shift (aref key 0))))
+          'delete-backward-char)))
+    map))
+
+(defvar essmeq--transient-map (essmeq--make-transient-map)
+  "Map bound transiently after `ess-smart-equals' key is pressed.
+The map continues to be active as long as that key is pressed.")
 
 (defun essmeq--clear-transient ()
+  "Predicate that returns t when "
   (equal (this-command-keys-vector) (vconcat ess-smart-equals-key)))
 
 
 ;;; Behavior Configuration 
 
-;; ATTN: Convert to defcustom
-(defvar ess-smart-equals-insertion-hook nil
+(defcustom ess-smart-equals-insertion-hook nil
   "A function called when an operator is inserted into the current buffer.
-This does not apply in cases when '=' is inserted literally.")
+This does not apply in cases when '=' is inserted literally."
+  :group 'ess-edit
+  :type 'function)
 
-;; ATTN: Convert to defcustom
-(defvar ess-smart-equals-default-modes
+(defcustom ess-smart-equals-default-modes
   '(ess-r-mode inferior-ess-r-mode ess-r-transcript-mode ess-roxy-mode)
-  "List of major modes where `ess-smart-equals-activate' binds '=' by default.")
+  "List of major modes where `ess-smart-equals-activate' binds '=' by default."
+  :group 'ess-edit
+  :type '(repeat symbol))
+
+(defcustom ess-smart-equals-extra-ops nil
+  "If non-nil, bind extra smart operators into the minor mode keymap."
+  :group 'ess-edit
+  :type 'boolean)
+
+(defcustom ess-smart-equals-open-brace-newline '(after)
+  "Controls auto-newlines for open braces in `electric-smart-equals-open-brace'.
+Only applicable when `ess-smart-equals-extra-ops' is t. This is a
+list containing zero or more of the symbols `before' and `after',
+indicating when and if a newline should be placed around an open
+brace."
+  :group 'ess-edit
+  :type '(repeat (choice (const before) (const after)))
+  )
+
+(defcustom ess-smart-equals-close-brace-newline '(after)
+  "Controls auto-newlines for close braces in `electric-smart-equals-open-brace'.
+Only applicable when `ess-smart-equals-extra-ops' is t. This is a
+list containing zero or more of the symbols `before' and `after',
+indicating when and if a newline should be placed around a close
+brace."
+  :group 'ess-edit
+  :type '(repeat (choice (const before) (const after)))
+  )
 
 
 ;;; Context and Matcher Configuration and Utilities
@@ -237,48 +295,63 @@ This does not apply in cases when '=' is inserted literally.")
                                          data))))
             matchers))))
 
-;; ATTN: Convert to defcustom
-;; ATTN: No matching context uses default, cdr nil means insert literally
-(defvar ess-smart-equals-contexts
+(defcustom ess-smart-equals-contexts
   '((t (comment)
        (string)
        (arglist "=" "==" "%>%")
        (index "==" "!=" "<=" "<" ">" ">=" "%in%" "=")
        (conditional "==" "!=" "<=" "<" ">" ">=" "%in%")
-       (t "<-" "=" "==" "<<-" "->" "->>" "%<>%"))
+       (all "<-" "<<-" "=" "->" "->>"
+            "==" "!=" "<" ">" "<=" ">="
+            "%<>%" "%>%"
+            "+" "*" "/" "%*%" "%%")
+       (t "<-" "<<-" "=" "==" "->" "->>" "%<>%"))
     (ess-roxy-mode
      (comment "<-" "=" "==" "<<-" "->" "->>" "%<>%")))
   "Prioritized lists of operator strings for each context and major mode.
-ATTN: structure
-ATTN: This should not be set directly; use with `ess-smart-equals-set-contexts'
-...")
+This is an alist where each key is either t or the symbol of a
+major mode and each value is in turn an alist mapping context
+symbols to lists of operator strings in the preferred order.
 
-;; ATTN: Convert to defcustom?
-(defvar ess-smart-equals-context-function nil
+An empty symbol list for a context means to insert `=' literally.
+
+If this is changed while the minor mode is running, you will need
+to disable and the re-enable the mode to make changes take
+effect."
+  :group 'ess-edit
+  :type '(alist
+          :key-type symbol
+          :value-type (alist :key-type symbol :value-type (repeat string))))
+
+(defcustom ess-smart-equals-context-function nil
   "If non-nil, a nullary function to calculate the syntactic context at point.
 It should return a symbol corresponding to a context, i.e., one
 of the keys in `ess-smart-equals-contexts', either pre-defined or
 user-defined. Absent any specific context, the function should
-return `t', which is used as a default.")
+return `t', which is used as a default. When set, this overrides the
+standard context calculation, so use it carefully."
+  :group 'ess-edit
+  :type 'function)
 
-(defvar-local essmeq--matcher-alist  ;; ATTN: set this by mode? or map modes?
+(defvar-local essmeq--matcher-alist
   (essmeq--build-matchers (map-elt ess-smart-equals-contexts t))
   "Alist mapping context symbols to operator matchers.
 Do not set this directly")
 
-(defun ess-smart-equals-set-contexts (contexts &optional mode)
-  ;; ATTN: handle 'default and mode cases separately
-  ;; ATTN: this is provisional for the moment
-  (if mode
+(defun ess-smart-equals-set-contexts (&optional mode context-alist)
+  (interactive (list (if current-prefix-arg major-mode nil) nil))
+  (let ((contexts (or context-alist ess-smart-equals-contexts)))
+    (if mode
+        (setq essmeq--matcher-alist
+              (essmeq--build-matchers
+               (map-merge 'list (map-elt contexts t) (map-elt contexts mode))))
       (setq essmeq--matcher-alist
-            (essmeq--build-matchers
-             (map-merge 'list (map-elt contexts t) (map-elt contexts key))))
-    (setq essmeq--matcher-alist (essmeq--build-matchers (map-elt contexts t)))))
+            (essmeq--build-matchers (map-elt contexts t))))))
 
 
 ;;; Utility Macros
 
-(defmacro essmeq-with-struct-slots (type spec-list inst &rest body)
+(defmacro essmeq--with-struct-slots (type spec-list inst &rest body)
   "Execute BODY with vars in SPEC-LIST bound to slots in struct INST of TYPE.
 TYPE is an unquoted symbol corresponding to a type defined by
 `cl-defstruct'. SPEC-LIST is a list, each of whose entries can
@@ -303,6 +376,20 @@ which was in turn borrowed from the EIEIO package."
          (unless (cl-typep ,obj ',type)
 	   (error "%s is not of type %s" ',inst ',type))
          ,(if (cdr body) `(progn ,@body) (car body))))))
+
+(defmacro essmeq--with-temporary-insert (text where &rest body)
+  "Inserting TEXT after point, execute BODY, delete TEXT.
+Returns the value of BODY and does not change point."
+  (declare (indent 2) (debug (sexp def-body)))
+  (let ((txt (make-symbol "text"))
+        (len (make-symbol "text-len"))
+        (after (eq where :after)))
+    `(let ((,txt ,text)
+           (,len ,(if (stringp text) (length text) `(length ,txt))))
+       (save-excursion
+         ,(if after `(save-excursion (insert ,txt)) `(insert ,txt))
+         (prog1 (save-excursion ,@body)
+           (delete-char ,(if after len `(- ,len))))))))
 
 
 ;;; Finite-State Machine for Operator Matching
@@ -379,7 +466,7 @@ Anchor the search at POS, or at point if nil. BOUND, if non-nil,
 limits the search to positions not before position BOUND. Assumes
 that surrounding whitespace is handled elsewhere.
 
-Return a dotted list of the form (ACCEPT START . POS) if a match
+Return a dotted list of the form (ACCEPT 0 START . POS) if a match
 exists, or nil otherwise. ACCEPT is the number of the accepting
 state in FSM, START is the position of the matching string's
 beginning, and POS is the position where scanning started, as
@@ -396,10 +483,10 @@ passed to this function."
                 start (1- start))
         (setq state :fail)))
     (if accepted
-        (cl-list* accepted start pos)
+        (cl-list* accepted 0 start pos)
       nil)))
 
-(defun essmeq--partial-match (fsm partial &optional pos bound)
+(defun essmeq--complete (fsm partial &optional pos bound)
   "Search backward for farthest partial match to a string specified by FSM.
 A partial match is a prefix of one of the target operators; the
 `farthest' match is the one that moves the position as far back
@@ -448,28 +535,44 @@ position where scanning started, as passed to this function."
                     start pos)
             (setq state :fail)))))
     (if accepted
-        (cl-list* accepted farthest-slen farthest-start pos)
+        ;; don't move to failure above so farthest-start off by one
+        (cl-list* accepted farthest-slen (1- farthest-start) pos)
       nil)))
-
-(defun essmeq--complete (fsm &optional pos bound)
-  "ATTN: complete using prefix table when implemented"
-  nil
-  )
 
 
 ;;; Contexts 
 
+(defun essmeq--inside-call-p ()
+  "Return non-nil if point is in a function call (or indexing construct).
+This is like `ess-inside-call-p' except it also returns true if a closing
+parenthesis after point will put point in a call. This is intended to be
+used after checking for indexing constructs."
+  (or (ess-inside-call-p)
+      (essmeq--with-temporary-insert ")" :after (ess-inside-call-p))))
+
 (defun essmeq--context (&optional pos)
-  "Compute context at position POS. ATTN: This is a stub for now"
+  "Compute context at position POS. Returns a context symbol or t.
+
+There are two known issues here. First, `ess-inside-call-p' does
+not detect a function call if the end parens are not closed. This
+is mostly fixed by using `essmeq--inside-call-p' instead. Second,
+because the R modes characterize % as a string character, a
+single % (e.g., an incomplete operator) will cause checks for
+function calls or brackets to fail. This can be fixed with a
+temporary % insertion, but at the moment, the added complexity
+does not seem worthwhile."
   (save-excursion
     (when pos (goto-char pos))
     (if ess-smart-equals-context-function
         (funcall ess-smart-equals-context-function)
       (cond
        ((ess-inside-comment-p)  'comment)
-       ((ess-inside-string-p)   'string)
+       ((let ((closing-char (ess-inside-string-p)))
+          (and closing-char (/= closing-char ?%)))
+        ;; R syntax table makes % a string character, which we ignore
+        'string)
        ((ess-inside-brackets-p) 'index)
-       ((ess-inside-call-p)
+       ((essmeq-inside-call-p)
         (if (save-excursion
               (goto-char (ess-containing-sexp-position))
               (or (ess-climb-call-name "if")
@@ -484,71 +587,93 @@ position where scanning started, as passed to this function."
 (defun essmeq--after-whitespace-p (&optional pos)
   (eq (char-syntax (char-before pos)) ?\ ))
 
-(defun essmeq--replace-region (text start end &optional padding)
+(defun essmeq--replace-region (text start &optional end padding)
   (save-excursion
     (goto-char start)
-    (delete-region start end)
+    (when end (delete-region start end))
     (let ((padding (or padding "")))
       (insert padding text padding))))
 
-(defun essmeq--process (&optional initial-pos)
-  (let* ((pos0 (or initial-pos (point)))
+(defun essmeq--search (&optional initial-pos no-partial)
+  (let* ((pt (point))
+         (pos0 (let ((p (or initial-pos pt)))
+                 (save-excursion
+                   (when initial-pos (goto-char p))
+                   (+ p (skip-syntax-forward " ")))))
          (pos (save-excursion
-                (when initial-pos (goto-char pos0))
+                (goto-char pos0)
                 (+ pos0 (skip-syntax-backward " "))))
          (context (essmeq--context pos0))
-         (matcher (map-elt essmeq--matcher-alist context))) 
-    ;; code below assumes point, should we drop initial-pos, or handle it below
-    (essmeq-with-struct-slots essmeq-matcher (fsm targets span) matcher
-      (pcase-let ((`(,accepted ,start . ,pos1)
-                   (essmeq--match fsm pos (- pos span)))
+         (matcher (map-elt essmeq--matcher-alist context)))
+    (essmeq--with-struct-slots essmeq-matcher (fsm targets span partial) matcher
+      (pcase-let ((`(,accepted ,slen ,start . ,pos1)
+                   (or (essmeq--match fsm pos (- pos span))
+                       (and (not no-partial)
+                            (essmeq--complete fsm partial pos (- pos span)))))
                   (num-ops (length targets)))
-        (if accepted
-            (let* ((op (mod (1+ accepted) num-ops))
-                   (op-string (aref targets op))
-                   (ws-start (if (essmeq--after-whitespace-p start)
-                                 (1- start)
-                               start)))
-              (insert " ") ;; if point at point-max end up wrongly positioned
-              (essmeq--replace-region op-string ws-start pos0 " ");; ATTN: configure padding
-              (delete-char -1)) 
-          ;; ATTN: add completion but for now just insert
-          (if (zerop num-ops)
-              (insert "=")
-            (insert " ")
-            (essmeq--replace-region (aref targets 0) pos pos0 " ")
-            (delete-char -1)))))))
+        (cond
+         (accepted (let* ((op (if (zerop slen)
+                                  (mod (1+ accepted) num-ops)
+                                accepted))
+                          (mtype (if (zerop slen) :exact :partial))
+                          (op-string (aref targets op))
+                          (ws-start (if (essmeq--after-whitespace-p start)
+                                        (1- start)
+                                      start)))
+                     (list mtype op-string ws-start pos0 " ")))
+         ((zerop num-ops) (list :literal "=" pt))
+         (t (list :no-match (aref targets 0) pos pos0 " ")))))))
 
-(defun essmeq--remove (&optional initial-pos)
+(defun essmeq--process (&optional initial-pos no-partial)
+  "Insert, cycle, or complete an appropriate operator based on context."
+  (let* ((match (cdr (essmeq--search initial-pos no-partial)))
+         (start (cadr match))
+         (end (caddr match))
+         (pad (and end (>= end (point)))))
+    ;;ATTN: still does not handle the initial-pos non-nil case
+    (when pad
+      (goto-char end)
+      (insert " "))
+    (apply #'essmeq--replace-region match)
+    (when pad
+      (delete-char -1))))
+
+(defun essmeq--remove ()
+  "Remove an exactly matching operator at point based on context."
   (interactive)
-  (let* ((pos0 (or initial-pos (point)))
-         (pos (save-excursion
-                (when initial-pos (goto-char pos0))
-                (+ pos0 (skip-syntax-backward " "))))
-         (context (essmeq--context pos0))
-         (matcher (map-elt essmeq--matcher-alist context))) 
-    ;; code below assumes point, should we drop initial-pos, or handle it below
-    (essmeq-with-struct-slots essmeq-matcher (fsm targets span) matcher
-      (pcase-let ((`(,accepted ,start . ,pos1)
-                   (essmeq--match fsm pos (- pos span))))
-        (when accepted
-            (let ((ws-start (if (essmeq--after-whitespace-p start)
-                                (1- start)
-                              start))
-                  (ws-end (if (essmeq--after-whitespace-p (1+ pos1))
-                              (1+ pos1)
-                            pos1)))
-              (essmeq--replace-region "" ws-start ws-end)))))))
+  (let* ((match (essmeq--search nil t))
+         (mtype (car match))
+         (start (caddr match))
+         (end (cadddr match)))
+    (if (eq mtype :exact)
+        (essmeq--replace-region "" start
+                                (if (essmeq--after-whitespace-p (1+ end))
+                                    (1+ end)
+                                  end))
+      (delete-char -1))))
 
-(defun essmeq--selected (op-string &optional initial-pos)
+(defun essmeq--selected (op-string)
+  "Insert operator string at point with padding, replacing existing operator.
+If called interactively, the typical case, select the operator by
+completion. If the context operator list is empty, insert
+operator string as is."
   (interactive (list (completing-read "Operator: "
                                       (thread-last ess-smart-equals-contexts
-                                        (alist-get t)
+                                        (alist-get 't)
                                         (mapcar #'cdr)
                                         (apply #'append)
                                         delete-dups))))
-  ;;ATTN:incomplete, to bind to tab in transient map
-  op-string)
+  (let* ((match (essmeq--search nil t))
+         (mtype (car match))
+         (start (caddr match))
+         (end (cadddr match)))
+    (if (or (eq mtype :exact) (eq mtype :no-match))
+        (essmeq--replace-region op-string start
+                                (if (essmeq--after-whitespace-p (1+ end))
+                                    (1+ end)
+                                  end)
+                                " ")
+      (insert op-string))))
 
 
 ;;; Entry Points
@@ -595,7 +720,6 @@ is always inserted as is."
   (interactive "P")
   (if literal
       (self-insert-command (if (integerp literal) literal 1))
-    ;; ATTN: what's missing here?
     (essmeq--process)
     (unless (eq last-command this-command)
       (set-transient-map essmeq--transient-map #'essmeq--clear-transient)))) 
