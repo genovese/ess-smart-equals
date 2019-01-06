@@ -233,9 +233,18 @@ keymaps used by the minor mode."
   "Map bound transiently after `ess-smart-equals' key is pressed.
 The map continues to be active as long as that key is pressed.")
 
-(defun essmeq--clear-transient ()
-  "Predicate that returns t when "
+(defun essmeq--keep-transient ()
+  "Predicate that returns t when the transient keymap should be maintained."
   (equal (this-command-keys-vector) (vconcat ess-smart-equals-key)))
+
+(defun essmeq--clear-overriding-context ()
+  "Transient exit function that resets both itself and any overriding context.
+This is a convenience function for fixing a context during one
+cycle of smart equals insertion. See
+`ess-smart-equals-overriding-context' and
+`ess-smart-equals-transient-exit-function'.."
+  (setq ess-smart-equals-overriding-context      nil
+        ess-smart-equals-transient-exit-function nil))
 
 
 ;;; Behavior Configuration 
@@ -253,9 +262,10 @@ This does not apply in cases when '=' is inserted literally."
   :type '(repeat symbol))
 
 (defcustom ess-smart-equals-extra-ops nil
-  "If non-nil, bind extra smart operators into the minor mode keymap."
+  "If non-nil, a symbol list of extra smart operators to bind in the mode map.
+Currently, only `brace' and `paren' are supported."
   :group 'ess-edit
-  :type 'boolean)
+  :type '(choice (const nil) (repeat (const brace) (const paren))))
 
 (defcustom ess-smart-equals-open-brace-newline '(after)
   "Controls auto-newlines for open braces in `electric-smart-equals-open-brace'.
@@ -264,8 +274,7 @@ list containing zero or more of the symbols `before' and `after',
 indicating when and if a newline should be placed around an open
 brace."
   :group 'ess-edit
-  :type '(repeat (choice (const before) (const after)))
-  )
+  :type '(repeat (choice (const before) (const after))))
 
 (defcustom ess-smart-equals-close-brace-newline '(after)
   "Controls auto-newlines for close braces in `electric-smart-equals-open-brace'.
@@ -274,8 +283,17 @@ list containing zero or more of the symbols `before' and `after',
 indicating when and if a newline should be placed around a close
 brace."
   :group 'ess-edit
-  :type '(repeat (choice (const before) (const after)))
-  )
+  :type '(repeat (choice (const before) (const after))))
+
+(defvar ess-smart-equals-overriding-context nil
+  "If non-nil, a context symbol that overrides the usual context calculation.
+Intended to be used in a transient manner, see
+`ess-smart-equals-transient-exit-function'.")
+
+(defvar ess-smart-equals-transient-exit-function nil
+  "If non-nil, a nullary function to be called on exit from the transient keymap.
+This can be used, for instance, to clear an overriding context.
+See `essmeq--transient-map'")
 
 
 ;;; Context and Matcher Configuration and Utilities
@@ -313,7 +331,12 @@ This is an alist where each key is either t or the symbol of a
 major mode and each value is in turn an alist mapping context
 symbols to lists of operator strings in the preferred order.
 
-An empty symbol list for a context means to insert `=' literally.
+The mappings for each mode are actually computed by merging the
+default (t) mapping with that specified for the mode, with the
+latter taking priority.
+
+An empty symbol list for a context means to insert
+`ess-smart-equals-key' literally.
 
 If this is changed while the minor mode is running, you will need
 to disable and the re-enable the mode to make changes take
@@ -325,11 +348,12 @@ effect."
 
 (defcustom ess-smart-equals-context-function nil
   "If non-nil, a nullary function to calculate the syntactic context at point.
-It should return a symbol corresponding to a context, i.e., one
-of the keys in `ess-smart-equals-contexts', either pre-defined or
-user-defined. Absent any specific context, the function should
-return `t', which is used as a default. When set, this overrides the
-standard context calculation, so use it carefully."
+It should return nil, which indicates to fall back on the usual
+context calculation, or a symbol corresponding to a context,
+i.e., one of the keys in `ess-smart-equals-contexts', either
+pre-defined or user-defined. Absent any specific context, the
+function can return `t', which is used as a default. When set,
+this is called as the first step in the context calculation."
   :group 'ess-edit
   :type 'function)
 
@@ -552,6 +576,9 @@ used after checking for indexing constructs."
 
 (defun essmeq--context (&optional pos)
   "Compute context at position POS. Returns a context symbol or t.
+If `ess-smart-equals-context-function' is non-nil, that function
+is called and a non-nil return value is used as the context; a
+nil value falls back on the ordinary computation.
 
 There are two known issues here. First, `ess-inside-call-p' does
 not detect a function call if the end parens are not closed. This
@@ -563,23 +590,23 @@ temporary % insertion, but at the moment, the added complexity
 does not seem worthwhile."
   (save-excursion
     (when pos (goto-char pos))
-    (if ess-smart-equals-context-function
-        (funcall ess-smart-equals-context-function)
-      (cond
-       ((ess-inside-comment-p)  'comment)
-       ((let ((closing-char (ess-inside-string-p)))
-          (and closing-char (/= closing-char ?%)))
-        ;; R syntax table makes % a string character, which we ignore
-        'string)
-       ((ess-inside-brackets-p) 'index)
-       ((essmeq-inside-call-p)
-        (if (save-excursion
-              (goto-char (ess-containing-sexp-position))
-              (or (ess-climb-call-name "if")
-                  (ess-climb-call-name "while")))
-            'conditional
-          'arglist))
-       (t)))))
+    (cond
+     ((and ess-smart-equals-context-function
+           (funcall ess-smart-equals-context-function)))
+     ((ess-inside-comment-p)  'comment)
+     ((let ((closing-char (ess-inside-string-p)))
+        (and closing-char (/= closing-char ?%)))
+      ;; R syntax table makes % a string character, which we ignore
+      'string)
+     ((ess-inside-brackets-p) 'index)
+     ((essmeq-inside-call-p)
+      (if (save-excursion
+            (goto-char (ess-containing-sexp-position))
+            (or (ess-climb-call-name "if")
+                (ess-climb-call-name "while")))
+          'conditional
+        'arglist))
+     (t))))
 
 
 ;;; Processing the Action Key
@@ -722,7 +749,9 @@ is always inserted as is."
       (self-insert-command (if (integerp literal) literal 1))
     (essmeq--process)
     (unless (eq last-command this-command)
-      (set-transient-map essmeq--transient-map #'essmeq--clear-transient)))) 
+      (set-transient-map essmeq--transient-map
+                         #'essmeq--keep-transient
+                         ess-smart-equals-transient-exit-function)))) 
 
 
 ;;; Minor Mode
