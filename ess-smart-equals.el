@@ -150,7 +150,7 @@
 ;;  automatically, you can replace this with
 ;;
 ;;      (use-package ess-smart-equals
-;;        :init   (setq ess-smart-equals-extra-ops 'bind)
+;;        :init   (setq ess-smart-equals-extra-ops '(brace paren))
 ;;        :after  (ess-r-mode)
 ;;        :config (ess-smart-equals-activate))
 ;;
@@ -184,7 +184,23 @@
 
 ;;; Key Configuration and Utilities
 
-(defvar ess-smart-equals-key "="
+(defun essmeq--make-transient-map ()
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
+    (define-key map "\t" #'essmeq--selected)
+    (dolist (key ess-smart-equals-cancel-keys)
+      (define-key map key #'essmeq--remove)
+      (when (and (or (stringp key) (vectorp key))
+                 (= (length key) 1)
+                 (not (eq (aref key 0) 7))) ;; Skip C-g
+        (define-key map ;; make shift-cancel just do regular backspace
+          (vector (if (listp (aref key 0))
+                      (cons 'shift (aref key 0))
+                    (list 'shift (aref key 0))))
+          'delete-backward-char)))
+    map))
+
+(defcustom ess-smart-equals-key "="
   "The key for smart assignment operators when `ess-smart-equals-mode' active.
 
 This should either be changed through the customization facility
@@ -213,21 +229,6 @@ keymaps used by the minor mode."
   :set (lambda (sym value)
          (set-default sym value)
          (setq essmeq--transient-map (essmeq--make-transient-map))))
-
-(defun essmeq--make-transient-map ()
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
-    (dolist (key ess-smart-equals-cancel-keys)
-      (define-key map key #'essmeq--remove)
-      (when (and (or (stringp key) (vectorp key))
-                 (= (length key) 1)
-                 (not (eq (aref key 0) 7))) ;; Skip C-g
-        (define-key map ;; make shift-cancel just do regular backspace
-          (vector (if (listp (aref key 0))
-                      (cons 'shift (aref key 0))
-                    (list 'shift (aref key 0))))
-          'delete-backward-char)))
-    map))
 
 (defvar essmeq--transient-map (essmeq--make-transient-map)
   "Map bound transiently after `ess-smart-equals' key is pressed.
@@ -267,33 +268,40 @@ Currently, only `brace' and `paren' are supported."
   :group 'ess-edit
   :type '(choice (const nil) (repeat (const brace) (const paren))))
 
-(defcustom ess-smart-equals-open-brace-newline '(after)
-  "Controls auto-newlines for open braces in `electric-smart-equals-open-brace'.
-Only applicable when `ess-smart-equals-extra-ops' is t. This is a
-list containing zero or more of the symbols `before' and `after',
-indicating when and if a newline should be placed around an open
-brace."
-  :group 'ess-edit
-  :type '(repeat (choice (const before) (const after))))
+(defcustom ess-smart-equals-brace-newlines '((open after)
+                                             (close before))
+  "Controls auto-newlines for braces in `electric-smart-equals-open-brace'.
+Only applicable when `ess-smart-equals-extra-ops' contains the
+symbol `brace'. This is an alist with keys `open' and `close' and
+with values that are lists containing the symbols `after' and/or
+`before', indicating when a newline should be placed. A missing
+key is equivalent to a nil value, meaning to place no newlines.
 
-(defcustom ess-smart-equals-close-brace-newline '(after)
-  "Controls auto-newlines for close braces in `electric-smart-equals-open-brace'.
-Only applicable when `ess-smart-equals-extra-ops' is t. This is a
-list containing zero or more of the symbols `before' and `after',
-indicating when and if a newline should be placed around a close
-brace."
+This can be controlled via Emacs's customization mechanism or can
+be added to your ESS style specification, as preferred."
   :group 'ess-edit
-  :type '(repeat (choice (const before) (const after))))
+  :type '(alist :key-type (choice (const open) (const close))
+                :value-type (repeat (choice (const before) (const after)))))
 
-(defvar ess-smart-equals-overriding-context nil
+
+;;; Internal Variables (that can be used for advanced customization)
+
+(defvar-local ess-smart-equals-overriding-context nil
   "If non-nil, a context symbol that overrides the usual context calculation.
 Intended to be used in a transient manner, see
 `ess-smart-equals-transient-exit-function'.")
 
-(defvar ess-smart-equals-transient-exit-function nil
+(defvar-local ess-smart-equals-transient-exit-function nil
   "If non-nil, a nullary function to be called on exit from the transient keymap.
 This can be used, for instance, to clear an overriding context.
 See `essmeq--transient-map'")
+
+(defvar-local essmeq--stop-transient nil
+  "A nullary function called to deactivate the most recent transient map.
+This is set automatically and should not be set explicitlyIf non-nil, a nullary function
+to be called on exit from the transient keymap. This can be used,
+for instance, to clear an overriding context. See
+`essmeq--transient-map'.")
 
 
 ;;; Context and Matcher Configuration and Utilities
@@ -599,7 +607,7 @@ does not seem worthwhile."
       ;; R syntax table makes % a string character, which we ignore
       'string)
      ((ess-inside-brackets-p) 'index)
-     ((essmeq-inside-call-p)
+     ((essmeq--inside-call-p)
       (if (save-excursion
             (goto-char (ess-containing-sexp-position))
             (or (ess-climb-call-name "if")
@@ -619,7 +627,8 @@ does not seem worthwhile."
     (goto-char start)
     (when end (delete-region start end))
     (let ((padding (or padding "")))
-      (insert padding text padding))))
+      (insert padding text padding)
+      (point))))
 
 (defun essmeq--search (&optional initial-pos no-partial)
   (let* ((pt (point))
@@ -630,7 +639,8 @@ does not seem worthwhile."
          (pos (save-excursion
                 (goto-char pos0)
                 (+ pos0 (skip-syntax-backward " "))))
-         (context (essmeq--context pos0))
+         (context (or ess-smart-equals-overriding-context
+                      (essmeq--context pos0)))
          (matcher (map-elt essmeq--matcher-alist context)))
     (essmeq--with-struct-slots essmeq-matcher (fsm targets span partial) matcher
       (pcase-let ((`(,accepted ,slen ,start . ,pos1)
@@ -695,12 +705,58 @@ operator string as is."
          (start (caddr match))
          (end (cadddr match)))
     (if (or (eq mtype :exact) (eq mtype :no-match))
-        (essmeq--replace-region op-string start
-                                (if (essmeq--after-whitespace-p (1+ end))
-                                    (1+ end)
-                                  end)
-                                " ")
+        (let ((end* (if (essmeq--after-whitespace-p (1+ end)) (1+ end) end)))
+          (goto-char (essmeq--replace-region op-string start end* " ")))
       (insert op-string))))
+
+
+;;; Extra Smart Operators
+
+(defun ess-smart-equals-open-brace (&optional literal)
+  "Inserts properly indented and spaced brace pair."
+  (interactive "P")
+  (if literal
+      (self-insert-command (if (integerp literal) literal 1))
+    (when (not (eq (char-syntax (char-before)) ?\ ))
+      (insert " "))
+    (let ((pt (point))
+          (skeleton-pair t)
+          (skeleton-pair-alist '((?\{ "\n" > _ "\n" > ?\}))))
+      (skeleton-pair-insert-maybe nil)
+      (goto-char pt)
+      (ess-indent-exp)
+      (forward-char 2)
+      (ess-indent-command))))
+
+(defun essmeq--paren-tab ()
+  (interactive)
+  (when (= (char-after) ?\ ) (delete-char 1))
+  (ess-up-list))
+
+(defun essmeq--paren-comma ()
+  (interactive)
+  (insert ", ")
+  (unless (derived-mode-p 'inferior-ess-mode)
+    (indent-according-to-mode)))
+
+(defvar essmeq--paren-map (let ((m (make-sparse-keymap)))
+                            (define-key m (kbd ",") 'essmeq--paren-comma)
+                            (define-key m [?\t] 'essmeq--paren-tab) m)
+  "Keymap active in fresh space in the middle of a new smart open paren.")
+
+(defun ess-smart-equals-open-paren (&optional literal)
+  "Inserts properly a properly spaced paren pair with an active keymap inside.
+ATTN"
+  (interactive "P")
+  (if literal
+      (self-insert-command (if (integerp literal) literal 1))
+    (let ((skeleton-pair t)
+          (skeleton-pair-alist '((?\(  _ " "
+                                       '(let ((pt (point)))
+                                          (put-text-property
+                                           (1- pt) pt 'keymap essmeq--paren-map))
+                                       ?\)))))
+      (skeleton-pair-insert-maybe nil))))
 
 
 ;;; Entry Points
@@ -745,13 +801,18 @@ just use equals.  This can effectively distinguish the two uses
 of equals in every case.  When RAW is non-nil, the equals sign
 is always inserted as is."
   (interactive "P")
-  (if literal
+  (if (and literal (not (equal literal '(16))))
       (self-insert-command (if (integerp literal) literal 1))
+    (when literal
+      (message "Cycling over all operators")
+      (setq ess-smart-equals-overriding-context  'all
+            ess-smart-equals-transient-exit-function #'essmeq--clear-overriding-context))
     (essmeq--process)
     (unless (eq last-command this-command)
-      (set-transient-map essmeq--transient-map
-                         #'essmeq--keep-transient
-                         ess-smart-equals-transient-exit-function)))) 
+      (setq essmeq--stop-transient
+            (set-transient-map essmeq--transient-map
+                               #'essmeq--keep-transient
+                               ess-smart-equals-transient-exit-function))))) 
 
 
 ;;; Minor Mode
