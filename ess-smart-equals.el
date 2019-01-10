@@ -182,205 +182,6 @@
 (require 'ess-r-mode)
 
 
-;;; Key Configuration and Utilities
-
-(defun essmeq--make-transient-map ()
-  (let ((map (make-sparse-keymap)))
-    (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
-    (define-key map "\t" #'essmeq--selected)
-    (dolist (key ess-smart-equals-cancel-keys)
-      (define-key map key #'essmeq--remove)
-      (when (and (or (stringp key) (vectorp key))
-                 (= (length key) 1)
-                 (not (eq (aref key 0) 7))) ;; Skip C-g
-        (define-key map ;; make shift-cancel just do regular backspace
-          (vector (if (listp (aref key 0))
-                      (cons 'shift (aref key 0))
-                    (list 'shift (aref key 0))))
-          'delete-backward-char)))
-    map))
-
-(defcustom ess-smart-equals-key "="
-  "The key for smart assignment operators when `ess-smart-equals-mode' active.
-
-This should either be changed through the customization facility
-or before the package is loaded because it affects several
-keymaps used by the minor mode."
-  :group 'ess-edit
-  :type 'string
-  :set (lambda (sym value)
-         (set-default sym value)
-         (setq essmeq--transient-map (essmeq--make-transient-map))
-         (define-key ess-smart-equals-mode-map ess-smart-equals-key nil)
-         (define-key ess-smart-equals-mode-map value 'ess-smart-equals)))
-
-(defcustom ess-smart-equals-cancel-keys (list [backspace]
-                                              (kbd "<DEL>")
-                                              (kbd "C-g"))
-  "List of keys transiently bound to cancel operator insertion or cycling.
-Except for C-g, a shifted version of each will instead delete backwards a 
-character, making it easy to delete only part of an operator if desired.
-
-This should either be changed through the customization facility
-or before the package is loaded because it affects several
-keymaps used by the minor mode."
-  :group 'ess-edit
-  :type '(repeat (choice string (restricted-sexp :match-alternatives (vectorp))))
-  :set (lambda (sym value)
-         (set-default sym value)
-         (setq essmeq--transient-map (essmeq--make-transient-map))))
-
-(defvar essmeq--transient-map (essmeq--make-transient-map)
-  "Map bound transiently after `ess-smart-equals' key is pressed.
-The map continues to be active as long as that key is pressed.")
-
-(defun essmeq--keep-transient ()
-  "Predicate that returns t when the transient keymap should be maintained."
-  (equal (this-command-keys-vector) (vconcat ess-smart-equals-key)))
-
-(defun essmeq--clear-overriding-context ()
-  "Transient exit function that resets both itself and any overriding context.
-This is a convenience function for fixing a context during one
-cycle of smart equals insertion. See
-`ess-smart-equals-overriding-context' and
-`ess-smart-equals-transient-exit-function'.."
-  (setq ess-smart-equals-overriding-context      nil
-        ess-smart-equals-transient-exit-function nil))
-
-
-;;; Behavior Configuration 
-
-(defcustom ess-smart-equals-insertion-hook nil
-  "A function called when an operator is inserted into the current buffer.
-This does not apply in cases when '=' is inserted literally."
-  :group 'ess-edit
-  :type 'function)
-
-(defcustom ess-smart-equals-default-modes
-  '(ess-r-mode inferior-ess-r-mode ess-r-transcript-mode ess-roxy-mode)
-  "List of major modes where `ess-smart-equals-activate' binds '=' by default."
-  :group 'ess-edit
-  :type '(repeat symbol))
-
-(defcustom ess-smart-equals-extra-ops nil
-  "If non-nil, a symbol list of extra smart operators to bind in the mode map.
-Currently, only `brace' and `paren' are supported."
-  :group 'ess-edit
-  :type '(choice (const nil) (repeat (const brace) (const paren))))
-
-(defcustom ess-smart-equals-brace-newlines '((open after)
-                                             (close before))
-  "Controls auto-newlines for braces in `electric-smart-equals-open-brace'.
-Only applicable when `ess-smart-equals-extra-ops' contains the
-symbol `brace'. This is an alist with keys `open' and `close' and
-with values that are lists containing the symbols `after' and/or
-`before', indicating when a newline should be placed. A missing
-key is equivalent to a nil value, meaning to place no newlines.
-
-This can be controlled via Emacs's customization mechanism or can
-be added to your ESS style specification, as preferred."
-  :group 'ess-edit
-  :type '(alist :key-type (choice (const open) (const close))
-                :value-type (repeat (choice (const before) (const after)))))
-
-
-;;; Internal Variables (that can be used for advanced customization)
-
-(defvar-local ess-smart-equals-overriding-context nil
-  "If non-nil, a context symbol that overrides the usual context calculation.
-Intended to be used in a transient manner, see
-`ess-smart-equals-transient-exit-function'.")
-
-(defvar-local ess-smart-equals-transient-exit-function nil
-  "If non-nil, a nullary function to be called on exit from the transient keymap.
-This can be used, for instance, to clear an overriding context.
-See `essmeq--transient-map'")
-
-(defvar-local essmeq--stop-transient nil
-  "A nullary function called to deactivate the most recent transient map.
-This is set automatically and should not be set explicitlyIf non-nil, a nullary function
-to be called on exit from the transient keymap. This can be used,
-for instance, to clear an overriding context. See
-`essmeq--transient-map'.")
-
-
-;;; Context and Matcher Configuration and Utilities
-
-(defun essmeq--build-matchers (context-alist)
-  ""
-  (declare (pure t) (side-effect-free t))
-  (let (matchers
-        (car-or-id (lambda (x) (if (consp x) (car x) x))))
-    (dolist (context context-alist (nreverse matchers))
-      (push (cons (car context)
-                  (essmeq--build-fsm (mapcar car-or-id  (cdr context))
-                                     (let* ((info (cdr context))
-                                            (data (mapcar #'cdr-safe info)))
-                                       (if (cl-every #'null data)
-                                           nil
-                                         data))))
-            matchers))))
-
-(defcustom ess-smart-equals-contexts
-  '((t (comment)
-       (string)
-       (arglist "=" "==" "%>%")
-       (index "==" "!=" "<=" "<" ">" ">=" "%in%" "=")
-       (conditional "==" "!=" "<=" "<" ">" ">=" "%in%")
-       (all "<-" "<<-" "=" "->" "->>"
-            "==" "!=" "<" ">" "<=" ">="
-            "%<>%" "%>%"
-            "+" "*" "/" "%*%" "%%")
-       (t "<-" "<<-" "=" "==" "->" "->>" "%<>%"))
-    (ess-roxy-mode
-     (comment "<-" "=" "==" "<<-" "->" "->>" "%<>%")))
-  "Prioritized lists of operator strings for each context and major mode.
-This is an alist where each key is either t or the symbol of a
-major mode and each value is in turn an alist mapping context
-symbols to lists of operator strings in the preferred order.
-
-The mappings for each mode are actually computed by merging the
-default (t) mapping with that specified for the mode, with the
-latter taking priority.
-
-An empty symbol list for a context means to insert
-`ess-smart-equals-key' literally.
-
-If this is changed while the minor mode is running, you will need
-to disable and the re-enable the mode to make changes take
-effect."
-  :group 'ess-edit
-  :type '(alist
-          :key-type symbol
-          :value-type (alist :key-type symbol :value-type (repeat string))))
-
-(defcustom ess-smart-equals-context-function nil
-  "If non-nil, a nullary function to calculate the syntactic context at point.
-It should return nil, which indicates to fall back on the usual
-context calculation, or a symbol corresponding to a context,
-i.e., one of the keys in `ess-smart-equals-contexts', either
-pre-defined or user-defined. Absent any specific context, the
-function can return `t', which is used as a default. When set,
-this is called as the first step in the context calculation."
-  :group 'ess-edit
-  :type 'function)
-
-(defvar-local essmeq--matcher-alist
-  (essmeq--build-matchers (map-elt ess-smart-equals-contexts t))
-  "Alist mapping context symbols to operator matchers.
-Do not set this directly")
-
-(defun ess-smart-equals-set-contexts (&optional mode context-alist)
-  (interactive (list (if current-prefix-arg major-mode nil) nil))
-  (let ((contexts (or context-alist ess-smart-equals-contexts)))
-    (if mode
-        (setq essmeq--matcher-alist
-              (essmeq--build-matchers
-               (map-merge 'list (map-elt contexts t) (map-elt contexts mode))))
-      (setq essmeq--matcher-alist
-            (essmeq--build-matchers (map-elt contexts t))))))
-
-
 ;;; Utility Macros
 
 (defmacro essmeq--with-struct-slots (type spec-list inst &rest body)
@@ -426,7 +227,7 @@ Returns the value of BODY and does not change point."
 
 ;;; Finite-State Machine for Operator Matching
 ;;
-;;  
+;;  ATTN  
 
 (cl-defstruct (essmeq-matcher
                (:constructor nil)
@@ -572,6 +373,241 @@ position where scanning started, as passed to this function."
       nil)))
 
 
+;;; Key Configuration and Utilities
+
+(defcustom ess-smart-equals-extra-ops nil
+  "If non-nil, a symbol list of extra smart operators to bind in the mode map.
+Currently, only `brace' and `paren' are supported."
+  :group 'ess-edit
+  :type '(choice (const nil) (repeat (const brace) (const paren))))
+
+(defvar ess-smart-equals-mode-map
+  (let ((map (make-sparse-keymap)))
+    (define-key map ess-smart-equals-key 'ess-smart-equals)
+    (when (memq 'brace ess-smart-equals-extra-ops)
+      (define-key map "{" 'ess-smart-equals-open-brace))
+    (when (memq 'paren ess-smart-equals-extra-ops)
+      (define-key map "(" 'ess-smart-equals-open-paren))
+    map)
+  "Keymap used in `ess-smart-equals-mode' binding smart operators.")
+
+(defun essmeq--make-transient-map (cancel-keys)
+  "Resets transient keymap used after `ess-smart-equals'.
+CANCEL-KEYS is a list of keys in that map that will clear the
+last insertion. See `essmeq--transient-map' and
+`ess-smart-equals-cancel-keys'."
+  (let ((map (make-sparse-keymap)))
+    (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
+    (define-key map "\t" #'essmeq--selected)
+    (dolist (key cancel-keys)
+      (define-key map key #'essmeq--remove)
+      (when (and (or (stringp key) (vectorp key))
+                 (= (length key) 1)
+                 (not (eq (aref key 0) 7))) ;; Skip C-g
+        (define-key map ;; make shift-cancel just do regular backspace
+          (vector (if (listp (aref key 0))
+                      (cons 'shift (aref key 0))
+                    (list 'shift (aref key 0))))
+          'delete-backward-char)))
+    map))
+
+(defcustom ess-smart-equals-cancel-keys (list [backspace]
+                                              (kbd "<DEL>")
+                                              (kbd "C-g"))
+  "List of keys transiently bound to cancel operator insertion or cycling.
+Except for C-g, a shifted version of each will instead delete backwards a 
+character, making it easy to delete only part of an operator if desired.
+
+This should either be changed through the customization facility
+or before the package is loaded because it affects several
+keymaps used by the minor mode."
+  :group 'ess-edit
+  :type '(repeat (choice string (restricted-sexp :match-alternatives (vectorp))))
+  :set (lambda (sym value)
+         (set-default sym value)
+         (setq essmeq--transient-map (essmeq--make-transient-map value))))
+
+(defvar essmeq--transient-map (essmeq--make-transient-map
+                               ess-smart-equals-cancel-keys)
+  "Map bound transiently after `ess-smart-equals' key is pressed.
+The map continues to be active as long as that key is pressed.")
+
+(defcustom ess-smart-equals-key "="
+  "The key for smart assignment operators when `ess-smart-equals-mode' active.
+
+This should either be changed through the customization facility
+or before the package is loaded because it affects several
+keymaps used by the minor mode."
+  :group 'ess-edit
+  :type 'string
+  :set (lambda (sym value)
+         (set-default sym value)
+         (define-key essmeq--transient-map
+           (kbd ess-smart-equals-key) #'ess-smart-equals)
+         (define-key ess-smart-equals-mode-map
+           (kbd ess-smart-equals-key) nil)
+         (define-key ess-smart-equals-mode-map (kbd value) 'ess-smart-equals)))
+
+(defun essmeq--keep-transient ()
+  "Predicate that returns t when the transient keymap should be maintained."
+  (equal (this-command-keys-vector) (vconcat ess-smart-equals-key)))
+
+(defun essmeq--clear-overriding-context ()
+  "Transient exit function that resets both itself and any overriding context.
+This is a convenience function for fixing a context during one
+cycle of smart equals insertion. See
+`ess-smart-equals-overriding-context' and
+`ess-smart-equals-transient-exit-function'.."
+  (setq ess-smart-equals-overriding-context      nil
+        ess-smart-equals-transient-exit-function nil))
+
+
+;;; Behavior Configuration 
+
+(defcustom ess-smart-equals-insertion-hook nil
+  "A function called when an operator is inserted into the current buffer.
+This (non-standard hook) function should accept six arguments 
+
+       CONTEXT MATCH-TYPE STRING START OLD-END PAD
+
+where CONTEXT is a context symbol, representing a key in the
+inner alists of `ess-smart-equals-contexts'; MATCH-TYPE is one of
+the keywords :exact, :partial, :no-match, or :literal; STRING is
+the operator string that was inserted; START is the buffer
+positions at the beginning of the inserted string (plus padding);
+OLD-END was the ending position of the previous content in the
+buffer; and PAD is a string giving the padding used on either
+side of the inserted operator, typically either empty or a single
+space.
+
+This feature is experimental and may be removed in a future version."
+  :group 'ess-edit
+  :type 'function)
+
+(defcustom ess-smart-equals-default-modes
+  '(ess-r-mode inferior-ess-r-mode ess-r-transcript-mode ess-roxy-mode)
+  "List of major modes where `ess-smart-equals-activate' binds '=' by default."
+  :group 'ess-edit
+  :type '(repeat symbol))
+
+(defcustom ess-smart-equals-brace-newlines '((open after)
+                                             (close before))
+  "Controls auto-newlines for braces in `electric-smart-equals-open-brace'.
+Only applicable when `ess-smart-equals-extra-ops' contains the
+symbol `brace'. This is an alist with keys `open' and `close' and
+with values that are lists containing the symbols `after' and/or
+`before', indicating when a newline should be placed. A missing
+key is equivalent to a nil value, meaning to place no newlines.
+
+This can be controlled via Emacs's customization mechanism or can
+be added to your ESS style specification, as preferred."
+  :group 'ess-edit
+  :type '(alist :key-type (choice (const open) (const close))
+                :value-type (repeat (choice (const before) (const after)))))
+
+
+;;; Internal Variables (that can be used for advanced customization)
+
+(defvar-local ess-smart-equals-overriding-context nil
+  "If non-nil, a context symbol that overrides the usual context calculation.
+Intended to be used in a transient manner, see
+`ess-smart-equals-transient-exit-function'.")
+
+(defvar-local ess-smart-equals-transient-exit-function nil
+  "If non-nil, a nullary function to be called on exit from the transient keymap.
+This can be used, for instance, to clear an overriding context.
+See `essmeq--transient-map'")
+
+(defvar-local essmeq--stop-transient nil
+  "A nullary function called to deactivate the most recent transient map.
+This is set automatically and should not be set explicitlyIf non-nil, a nullary function
+to be called on exit from the transient keymap. This can be used,
+for instance, to clear an overriding context. See
+`essmeq--transient-map'.")
+
+
+;;; Context and Matcher Configuration and Utilities
+
+(defun essmeq--build-matchers (context-alist)
+  ""
+  (declare (pure t) (side-effect-free t))
+  (let (matchers
+        (car-or-id (lambda (x) (if (consp x) (car x) x))))
+    (dolist (context context-alist (nreverse matchers))
+      (push (cons (car context)
+                  (essmeq--build-fsm (mapcar car-or-id  (cdr context))
+                                     (let* ((info (cdr context))
+                                            (data (mapcar #'cdr-safe info)))
+                                       (if (cl-every #'null data)
+                                           nil
+                                         data))))
+            matchers))))
+
+(defcustom ess-smart-equals-contexts
+  '((t (comment)
+       (string)
+       (arglist "=" "==" "%>%")
+       (index "==" "!=" "<=" "<" ">" ">=" "%in%" "=")
+       (conditional "==" "!=" "<=" "<" ">" ">=" "%in%")
+       ;;(% "%%" "%/%" "%<>%" "%>%" "%*%" "%in%" "%o%" "%x%")
+       (all "<-" "<<-" "=" "->" "->>"
+            "==" "!=" "<" ">" "<=" ">="
+            "%<>%" "%>%"
+            "+" "*" "/" "%*%" "%%")
+       (t "<-" "<<-" "=" "==" "->" "->>" "%<>%"))
+    (ess-roxy-mode
+     (comment "<-" "=" "==" "<<-" "->" "->>" "%<>%")))
+  "Prioritized lists of operator strings for each context and major mode.
+This is an alist where each key is either t or the symbol of a
+major mode and each value is in turn an alist mapping context
+symbols to lists of operator strings in the preferred order.
+
+The mappings for each mode are actually computed by merging the
+default (t) mapping with that specified for the mode, with the
+latter taking priority.
+
+An empty symbol list for a context means to insert
+`ess-smart-equals-key' literally.
+
+If this is changed while the minor mode is running, you will need
+to disable and the re-enable the mode to make changes take
+effect."
+  :group 'ess-edit
+  :type '(alist
+          :key-type symbol
+          :value-type (alist :key-type symbol :value-type (repeat string))))
+
+(defcustom ess-smart-equals-context-function nil
+  "If non-nil, a nullary function to calculate the syntactic context at point.
+It should return nil, which indicates to fall back on the usual
+context calculation, or a symbol corresponding to a context,
+i.e., one of the keys in `ess-smart-equals-contexts', either
+pre-defined or user-defined. Absent any specific context, the
+function can return `t', which is used as a default. When set,
+this is called as the first step in the context calculation. This
+function has access to `ess-smart-equals-overriding-context' and
+can choose to respect it (by returning it or nil if set) or
+ignore it. That variable is next in priority in determining the
+context."
+  :group 'ess-edit
+  :type 'function)
+
+(defvar-local essmeq--matcher-alist
+  (essmeq--build-matchers (map-elt ess-smart-equals-contexts t))
+  "Alist mapping context symbols to operator matchers.
+Do not set this directly")
+
+(defun ess-smart-equals-set-contexts (&optional mode context-alist)
+  (interactive (list (if current-prefix-arg major-mode nil) nil))
+  (let ((contexts (or context-alist ess-smart-equals-contexts)))
+    (if mode
+        (setq essmeq--matcher-alist
+              (essmeq--build-matchers
+               (map-merge 'list (map-elt contexts t) (map-elt contexts mode))))
+      (setq essmeq--matcher-alist
+            (essmeq--build-matchers (map-elt contexts t))))))
+
+
 ;;; Contexts 
 
 (defun essmeq--inside-call-p ()
@@ -595,12 +631,15 @@ because the R modes characterize % as a string character, a
 single % (e.g., an incomplete operator) will cause checks for
 function calls or brackets to fail. This can be fixed with a
 temporary % insertion, but at the moment, the added complexity
-does not seem worthwhile."
+does not seem worthwhile. Note similarly that when
+`ess-inside-string-p' returns a ?%, we could use the % context to
+limit to matches to the %-operators."
   (save-excursion
     (when pos (goto-char pos))
     (cond
      ((and ess-smart-equals-context-function
            (funcall ess-smart-equals-context-function)))
+     (ess-smart-equals-overriding-context)
      ((ess-inside-comment-p)  'comment)
      ((let ((closing-char (ess-inside-string-p)))
         (and closing-char (/= closing-char ?%)))
@@ -631,16 +670,15 @@ does not seem worthwhile."
       (point))))
 
 (defun essmeq--search (&optional initial-pos no-partial)
-  (let* ((pt (point))
-         (pos0 (let ((p (or initial-pos pt)))
-                 (save-excursion
-                   (when initial-pos (goto-char p))
-                   (+ p (skip-syntax-forward " ")))))
+  "ATTN"
+  (let* ((pt (or initial-pos (point)))
+         (pos0 (save-excursion
+                 (when initial-pos (goto-char pt))
+                 (+ pt (skip-syntax-forward " "))))
          (pos (save-excursion
                 (goto-char pos0)
                 (+ pos0 (skip-syntax-backward " "))))
-         (context (or ess-smart-equals-overriding-context
-                      (essmeq--context pos0)))
+         (context (essmeq--context pos0))
          (matcher (map-elt essmeq--matcher-alist context)))
     (essmeq--with-struct-slots essmeq-matcher (fsm targets span partial) matcher
       (pcase-let ((`(,accepted ,slen ,start . ,pos1)
@@ -657,36 +695,30 @@ does not seem worthwhile."
                           (ws-start (if (essmeq--after-whitespace-p start)
                                         (1- start)
                                       start)))
-                     (list mtype op-string ws-start pos0 " ")))
-         ((zerop num-ops) (list :literal "=" pt))
-         (t (list :no-match (aref targets 0) pos pos0 " ")))))))
+                     (list context mtype op-string ws-start pos0 " ")))
+         ((zerop num-ops) (list context :literal "=" pt))
+         (t (list context :no-match (aref targets 0) pos pos0 " ")))))))
 
-(defun essmeq--process (&optional initial-pos no-partial)
-  "Insert, cycle, or complete an appropriate operator based on context."
-  (let* ((match (cdr (essmeq--search initial-pos no-partial)))
-         (start (cadr match))
-         (end (caddr match))
-         (pad (and end (>= end (point)))))
-    ;;ATTN: still does not handle the initial-pos non-nil case
-    (when pad
-      (goto-char end)
-      (insert " "))
-    (apply #'essmeq--replace-region match)
-    (when pad
-      (delete-char -1))))
+(defun essmeq--process (&optional no-partial)
+  "Insert, cycle, or complete an operator at point based on context.
+ATTN"
+  (let* ((match (essmeq--search (point) no-partial))
+         (spec (cddr match)))
+    (goto-char (apply #'essmeq--replace-region spec))
+    (when ess-smart-equals-insertion-hook
+      (apply ess-smart-equals-insertion-hook spec))))
 
 (defun essmeq--remove ()
-  "Remove an exactly matching operator at point based on context."
+  "Remove a matching operator at point based on context, else one character."
   (interactive)
-  (let* ((match (essmeq--search nil t))
+  (let* ((match (cdr (essmeq--search nil t)))
          (mtype (car match))
          (start (caddr match))
          (end (cadddr match)))
-    (if (eq mtype :exact)
-        (essmeq--replace-region "" start
-                                (if (essmeq--after-whitespace-p (1+ end))
-                                    (1+ end)
-                                  end))
+    (if-let (((eq mtype :exact))
+             (end+ws (1+ end))) ;; end not nil in :exact case
+        (essmeq--replace-region
+         "" start (if (essmeq--after-whitespace-p end+ws) end+ws end))
       (delete-char -1))))
 
 (defun essmeq--selected (op-string)
@@ -700,7 +732,7 @@ operator string as is."
                                         (mapcar #'cdr)
                                         (apply #'append)
                                         delete-dups))))
-  (let* ((match (essmeq--search nil t))
+  (let* ((match (cdr (essmeq--search nil t)))
          (mtype (car match))
          (start (caddr match))
          (end (cadddr match)))
@@ -817,14 +849,6 @@ is always inserted as is."
 
 ;;; Minor Mode
 
-(defvar ess-smart-equals-mode-map
-  (let ((map (make-sparse-keymap)))
-    (define-key map ess-smart-equals-key 'ess-smart-equals)
-    (when ess-smart-equals-extra-ops
-      (define-key map "{" 'ess-smart-equals-open-brace))
-    map)
-  "Keymap used in `ess-smart-equals-mode' binding smart operators.")
-
 ;;;###autoload
 (define-minor-mode ess-smart-equals-mode
   "Minor mode for setting the '=' key to intelligently handle assignment.
@@ -838,7 +862,7 @@ function of the same name instead."
   :lighter nil
   :keymap ess-smart-equals-mode-map
   (when ess-smart-equals-mode
-    (ess-smart-equals-set-contexts ess-smart-equals-contexts major-mode)))
+    (ess-smart-equals-set-contexts major-mode)))
 
 
 (provide 'ess-smart-equals)
