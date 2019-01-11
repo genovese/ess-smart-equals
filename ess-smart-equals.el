@@ -1,4 +1,4 @@
-;;; ess-smart-equals.el --- better smart-assignment with =-key in R and S  -*- lexical-binding: t; -*-
+;;; ess-smart-equals.el --- a flexible, context-sensitive assignment key for R and S  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2015-2019 Christopher R. Genovese, all rights reserved.
 
@@ -37,18 +37,17 @@
 ;;  character in the S language; 2. the somewhat
 ;;  inconvenient-to-type, if conceptually pure, '<-' operator as the
 ;;  preferred assignment operator; 3. the ability to use either an
-;;  '=' or an '<-' for assignment; and 4. the multiple roles that
-;;  '=' can play, including for setting named arguments in a
-;;  function call.
+;;  '=', '<-', and a variety of other operators for assignment; and
+;;  4. the multiple roles that '=' can play, including for setting
+;;  named arguments in a function call.
 ;;
-;;  This package gives an alternative smart assignment operator for
-;;  R (i.e., S) code that is tied to the '=' key; in fact, it
-;;  handles assignment and comparison operators as well as named
-;;  argument setting. It uses context in the code to intelligently
-;;  guess which operator is intended and then allows very easy
-;;  cycling through the possible operators. The contexts and the
-;;  operators that are cycled through in each context are
-;;  customizable.
+;;  This package offers a flexible, context-sensitive assignment key
+;;  for R and S that is, by default, tied to the '=' key. This key
+;;  inserts or completes relevant, properly spaced operators
+;;  (assignment, comparison, etc.) based on the syntactic context in
+;;  the code. It allows very easy cycling through the possible
+;;  operators in that context. The contexts, the operators, and
+;;  their cycling order in each context are customizable.
 ;;
 ;;  The package defines a minor mode `ess-smart-equals-mode',
 ;;  intended for S-language modes (e.g., ess-r-mode,
@@ -57,8 +56,9 @@
 ;;  context-sensitive completion and cycling of relevant operators.
 ;;  When the mode is active and an '=' is pressed:
 ;;
-;;   1. In specified contexts (which for most major modes means
-;;      in strings or comments), just insert '='.
+;;   1. With a prefix argument or in specified contexts (which for
+;;      most major modes means in strings or comments), just
+;;      insert '='.
 ;; 
 ;;   2. If an operator relevant to the context lies before point
 ;;      (with optional whitespace), it is replaced, cyclically, by the
@@ -71,7 +71,10 @@
 ;;      with surrounding whitespace (see `ess-smart-equals-no-spaces').
 ;;
 ;;  Consecutive presses of '=' cycle through the relevant operators.
-;;  With a prefix argument, '=' always just inserts an '='.
+;;  After an '=', a backspace (or other configurable keys) removes
+;;  the last operator and tab offers a choice of operators by completion.
+;;  (Shift-backspace will delete one character only and restore the
+;;  usual maning of backspace.) See `ess-smart-equals-cancel-keys'.
 ;;
 ;;  By default, the minor mode activates the '=' key, but this can
 ;;  be customized by setting the option `ess-smart-equals-key' before
@@ -102,13 +105,15 @@
 ;;     #...foo ^          #...foo =^     #...foo ==^       #...foo ===^
 ;;
 ;;
-;;   As a bonus, if `ess-smart-equals-extra-ops' is non-nil when
-;;   this package is loaded, this package also binds some other
-;;   smart operators that may prove useful. Currently, only
-;;   `ess-smart-equals-open-brace' is defined, intended to be bound
-;;   to '{'; it configurably places a properly indented and spaced
-;;   matching pair of braces at point or around the region if
-;;   active. See also `ess-smart-equals-brace-newlines'.
+;;   As a bonus, the value of the variable
+;;   `ess-smart-equals-extra-ops' when this package is loaded,
+;;   determines some other smart operators that may prove useful.
+;;   Currently, only `brace' and `paren' are supported, causing
+;;   `ess-smart-equals-open-brace' and `ess-smart-equals-open-paren'
+;;   to be bound to '{' and '(', respectively. These configurably
+;;   places a properly indented and spaced matching pair at point or
+;;   around the region if active. See also
+;;   `ess-smart-equals-brace-newlines'.
 ;;
 ;;   Finally, the primary user facing functions are named with a
 ;;   prefix `ess-smart-equals-' to avoid conflicts with other
@@ -133,14 +138,14 @@
 ;;  `use-package', you can do
 ;;
 ;;      (use-package ess-smart-equals
-;;        :after (ess-r-mode)
+;;        :after (:any ess-r-mode inferior-ess-r-mode ess-r-transcript-mode)
 ;;        :config (ess-smart-equals-activate))
 ;;
 ;;  somewhere in your init file. An equivalent but less concise version
 ;;  of this is
 ;;
 ;;      (use-package ess-smart-equals
-;;        :after (ess-r-mode)
+;;        :after (:any ess-r-mode inferior-ess-r-mode ess-r-transcript-mode)
 ;;        :hook ((ess-r-mode . ess-smart-equals-mode)
 ;;               (inferior-ess-r-mode . ess-smart-equals-mode)
 ;;               (ess-r-transcript-mode . ess-smart-equals-mode)
@@ -151,7 +156,7 @@
 ;;
 ;;      (use-package ess-smart-equals
 ;;        :init   (setq ess-smart-equals-extra-ops '(brace paren))
-;;        :after  (ess-r-mode)
+;;        :after  (:any ess-r-mode inferior-ess-r-mode ess-r-transcript-mode)
 ;;        :config (ess-smart-equals-activate))
 ;;
 ;;  Details on customization are provided in the README file.
@@ -227,7 +232,52 @@ Returns the value of BODY and does not change point."
 
 ;;; Finite-State Machine for Operator Matching
 ;;
-;;  ATTN  
+;;  We do backwards anchored matching of operator lists using a
+;;  pre-built finite-state machine. This offers several advantages
+;;  over a direct sequence of regular expression matches. First, in
+;;  benchmarks with compiled code, the FSM matcher gives comparable,
+;;  though typically better, performance than the regexp approach.
+;;  Second, backwards regex matching in emacs (excluding
+;;  looking-back, which is slow) does not give the longest match,
+;;  requiring disambiguation between say '<-' and '<<-'. Third, we
+;;  can handle partial matches automatically with the information
+;;  computed at fsm build time, making it easy to offer completion.
+;;  Fourth, we can control priority order in the match easily and
+;;  can associate additional information with the matched operator.
+;;  Note that the search is backward, so the FSM matching starts
+;;  in state 0 at the *end* of the strings.
+;;
+;;  Each FSM is reepresented by an `essmeq-matcher' object (a struct).
+;;  This has several slots:
+;;
+;;     :fsm The finite state machine. Each state is either nil or an
+;;          alist mapping characters to transitions of the form
+;;          (CHAR NEXT-STATE ACCEPTED?) where ACCEPTED? is either
+;;          nil when the transition is not to an accepting state
+;;          or an index into the target string vector when it is.
+;;          Note that acceptance is signaled on the *transition*
+;;          not in the state itself, so many accepting states are
+;;          often nil. Because the search is anchored, a state
+;;          can only accept zero or one strings and there can
+;;          be multiple accepting states along the path.
+;;
+;;     :targets The vector of strings being matched, without padding.
+;;
+;;     :span The maximum length of the target strings
+;;
+;;     :data A vector, the same length as targets, of optional
+;;           associated data.
+;;
+;;     :partial A table of links that can be used for computing
+;;              partial matches. Each partial element is a list of
+;;              the form (CHAR (STATE . SLEN)), where STATE is a
+;;              candidate STATE to start in for finding the partial
+;;              match and SLEN is the number of skipped characters
+;;              at the end of the string for that partial match.
+;;
+;;  These matchers are built with `essmewq--build-fsm' and matched
+;;  with `essmeq--match' (for exact matches) and `essmeq--complete'
+;;  (for partial matches).
 
 (cl-defstruct (essmeq-matcher
                (:constructor nil)
@@ -670,7 +720,17 @@ limit to matches to the %-operators."
       (point))))
 
 (defun essmeq--search (&optional initial-pos no-partial)
-  "ATTN"
+  "Search backwards for an operator matching the current context.
+Search is anchored at INITIAL-POS, or point if nil. If NO-PARTIAL
+is nil, then partial matches of a prefix of relevant operators
+strings are allowed. Returns a list (CONTEXT MTYPE STRING START
+END PADDING), where CONTEXT is a context symbol in
+`ess-smart-equals-contexts'; MTYPE is a keyword among :exact,
+:partial, :literal (for literal '=' insertion), and :no-match;
+STRING is the operator string to be inserted, replacing the
+region between START and END. END is non-nil unless MTYPE is
+:literal. Finally, PAD is the string padding the actual operator
+on both sides, usually either a single space or an empty string."
   (let* ((pt (or initial-pos (point)))
          (pos0 (save-excursion
                  (when initial-pos (goto-char pt))
@@ -701,7 +761,9 @@ limit to matches to the %-operators."
 
 (defun essmeq--process (&optional no-partial)
   "Insert, cycle, or complete an operator at point based on context.
-ATTN"
+Point ends up at the end of the inserted string. Calls
+`ess-smart-equals-insertion-hook' on the result of the
+search (see `essmeq--search') if the hook is non-nil."
   (let* ((match (essmeq--search (point) no-partial))
          (spec (cddr match)))
     (goto-char (apply #'essmeq--replace-region spec))
@@ -778,7 +840,10 @@ operator string as is."
 
 (defun ess-smart-equals-open-paren (&optional literal)
   "Inserts properly a properly spaced paren pair with an active keymap inside.
-ATTN"
+Point is left in the middle of the paren pair and associated with
+a special keymap, where tab deletes the extra space and moves
+point out of the parentheses and comma inserts a spaced comma,
+keeping point on the special space character. "
   (interactive "P")
   (if literal
       (self-insert-command (if (integerp literal) literal 1))
@@ -821,17 +886,20 @@ just described."
 
 ;;;###autoload
 (defun ess-smart-equals (&optional literal)
-  "Insert, or substitute, a properly-spaced R (assignment) operator at point.
-If an assignment operator is already present before point, it is replaced
-by the next operator in `ess-smart-equals-operators', taken cyclically.
-The order of these operators is somewhat dependent on context. For instance,
-in the argument list of a function call, a single `=' is first rather 
-than the standard `<-'; spacing in this case is also determined by
-the value of `ess-smart-equals-space-named-arguments'.
-For equal signs not preceded by spaces, as in argument lists,
-just use equals.  This can effectively distinguish the two uses
-of equals in every case.  When RAW is non-nil, the equals sign
-is always inserted as is."
+  "Insert or complete a properly-spaced R/S (assignment) operator at point.
+With a prefix argument (or with LITERAL non-nil) insert this key
+literally, repeated LITERAL times if a positive integer.
+Otherwise, complete a partial operator or insert a new operator
+based on context (major mode and syntactic context) according to
+the specification given in `ess-smart-equals-contexts'.
+Immediately following invocations of the command cycle through
+operators in this context based list in the specified priority
+order. Immediately following insertion selected keys (e.g.,
+backspace) will remove the inserted operator or (e.g., tab) allow
+selection of an inserted operator by completion. See
+`ess-smart-equals-cancel-keys'; a shift-modified one of these
+keys (except 'C-g') will do a single character deletion and
+restore the standard meaning of keys."
   (interactive "P")
   (if (and literal (not (equal literal '(16))))
       (self-insert-command (if (integerp literal) literal 1))
@@ -851,11 +919,25 @@ is always inserted as is."
 
 ;;;###autoload
 (define-minor-mode ess-smart-equals-mode
-  "Minor mode for setting the '=' key to intelligently handle assignment.
+  "Minor mode enabling a smart key for context-aware operator insertion/cycling.
 
-ATTN
+Ess-smart-equals-mode is a buffer-local minor mode. Enabling it
+binds a key ('=' by default) to a function that inserts,
+completes, or cycles among operators chosen by the syntactic
+context at point. These contexts and the priorities of insertion
+and cycling are customizable. The operators inserted are usually
+assignment operators but can include others as well, e.g.,
+comparison operators in and `if' or `while'. When
+`ess-smart-equals-extra-ops' is appropriately set, this minor
+mode also activates additional smart operators for convenience.
 
-With a prefix argument, '=' always just inserts an '='.
+When called interactively, `ess-smart-equals-mode' toggles the
+mode without a prefix argument; disables the mode if the prefix
+argument is a non-positive integer; and enables the mode if the
+prefix argument is a positive integer. When called from Lisp, the
+command toggles the mode with argument `toggle'; disables the
+mode for a non-positive integer; and enables the mode otherwise,
+even with an omitted or nil argument.
 
 Do not set the variable `ess-smart-equals-mode' directly; use the
 function of the same name instead."
