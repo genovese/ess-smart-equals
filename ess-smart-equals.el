@@ -130,12 +130,14 @@
 ;;
 ;;  To activate, you need only do
 ;;
-;;      (require 'ess-smart-equals)
-;;      (ess-smart-equals-activate)
+;;      (with-eval-after-load 'ess-r-mode
+;;        (require 'ess-smart-equals)
+;;        (ess-smart-equals-activate))
 ;;
-;;  somewhere in your init file.  and then add `ess-smart-equals-mode' to any
-;;  desired mode hooks. For those who use the outstanding
-;;  `use-package', you can do
+;;  somewhere in your init file, which will add `ess-smart-equals-mode' to 
+;;  a prespecified (but customizable) list of mode hooks.
+;;
+;;  For those who use the outstanding `use-package', you can do
 ;;
 ;;      (use-package ess-smart-equals
 ;;        :after (:any ess-r-mode inferior-ess-r-mode ess-r-transcript-mode)
