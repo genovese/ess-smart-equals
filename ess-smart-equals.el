@@ -278,13 +278,13 @@ Returns the value of BODY and does not change point."
 ;;              match and SLEN is the number of skipped characters
 ;;              at the end of the string for that partial match.
 ;;
-;;  These matchers are built with `essmewq--build-fsm' and matched
+;;  These matchers are built with `essmeq--build-fsm' and matched
 ;;  with `essmeq--match' (for exact matches) and `essmeq--complete'
 ;;  (for partial matches).
 
 (cl-defstruct (essmeq-matcher
                (:constructor nil)
-               (:constructor essmeq--make-matcher
+               (:constructor essmeq-make-matcher
                              (strings
                               &key
                               (fsm (make-vector
@@ -296,8 +296,8 @@ Returns the value of BODY and does not change point."
                               &aux
                               (targets (vconcat strings))
                               (data (vconcat info))))
-               (:copier essmeq--copy-matcher)
-               (:predicate essmeq--matcher-p))
+               (:copier essmeq-copy-matcher)
+               (:predicate essmeq-matcher-p))
   fsm targets span data partial)
 
 (defun essmeq--build-fsm (ops &optional data)
@@ -877,6 +877,8 @@ keeping point on the special space character. "
   (interactive "P")
   (if literal
       (self-insert-command (if (integerp literal) literal 1))
+    ;; ATTN: add a condition to test (ess-inside-string-or-comment-p)
+    ;; Check syntax table for inferior-ess-r-mode for ', apparently not string
     (let ((skeleton-pair t)
           (skeleton-pair-alist '((?\( _ " "
                                       '(let ((pt (point)))
