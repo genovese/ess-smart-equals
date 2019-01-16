@@ -9,7 +9,7 @@
         (should (equal fsm fsm0))
         (should (equal targets ops0))
         (should (= span 2))
-        (with-temp-buffer
+        (with-ess-buffer
           (insert "a <- b ;;\n123\nZ")
           (should (equal (essmeq--match fsm 5 1) '(0 0 3 . 5)))
           (should (equal (essmeq--match fsm 12 1) nil)))))))
@@ -42,7 +42,7 @@
        (should (equal fsm fsm1))
        (should (equal targets ops1))
        (should (= span 4))
-       (with-temp-buffer
+       (with-ess-buffer
          (insert "a <- b;\nc = d;\ne == f;\ng ->> h;\ni %<>% j;\n")
          (should (equal (essmeq--match fsm 5)  '(0 0 3 . 5)))
          (should (equal (essmeq--match fsm 12) '(1 0 11 . 12)))
@@ -50,7 +50,7 @@
          (should (equal (essmeq--match fsm 29) '(5 0 26 . 29)))
          (should (equal (essmeq--match fsm 39) '(6 0 35 . 39)))
          (should (equal (essmeq--match fsm 10 1) nil)))
-       (with-temp-buffer
+       (with-ess-buffer
          (insert "a < b;\nc - d;\ne = f;\ng -> h;\ni %< j;\n")
          (should (equal (essmeq--complete fsm partial 4)  '(0 1 3 . 4)))
          (should (equal (essmeq--complete fsm partial 11) '(4 1 10 . 11)))
@@ -61,7 +61,7 @@
 
 (ert-deftest ess-smart-equals/inside-call-p-test ()
   "Test modified check of whether we are inside a syntactic call"
-  (with-temp-buffer
+  (with-ess-buffer
     (insert "if( z ) x g(y, z, w) h(a,   ")
     (goto-char 5)
     (should (essmeq--inside-call-p))
@@ -78,7 +78,7 @@
 
 (ert-deftest ess-smart-equals/contexts ()
   "Test modified check of whether we are inside a syntactic call"
-  (with-temp-buffer
+  (with-ess-buffer
     (insert "#2345\n")
     (insert "\"89AB\"\n")
     (insert "a\n")

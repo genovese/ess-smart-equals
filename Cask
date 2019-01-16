@@ -1,6 +1,6 @@
 (source melpa)
 
-(package "ess-smart-equals" "0.2.1" "Better smart-assignment with = in R and S, no underscores.")
+(package "ess-smart-equals" "0.2.1" "A flexible, context-sensitive assignment key for R and S")
 
 (depends-on "ess")
 

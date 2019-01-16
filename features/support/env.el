@@ -1,23 +1,35 @@
 (require 'f)
-
-(defvar ess-smart-equals-support-path
-  (f-dirname load-file-name))
-
-(defvar ess-smart-equals-features-path
-  (f-parent ess-smart-equals-support-path))
+(require 'subr-x)
 
 (defvar ess-smart-equals-root-path
-  (f-parent ess-smart-equals-features-path))
+  (thread-first load-file-name
+    f-dirname
+    f-parent
+    f-parent))
 
 (defvar ess-smart-equals-ess-path
-  (f-join (f-dirname (locate-library "ess-autoloads")) "lisp"))
+  (f-dirname (locate-library "ess")))
+
+(defvar ess-smart-equals-major-mode #'ess-r-mode
+  "Major mode to use in smart-equals ecukes tests.")
 
 (add-to-list 'load-path ess-smart-equals-ess-path)
 (add-to-list 'load-path ess-smart-equals-root-path)
 
 (require 'ert)
 (require 'espuds)
-(require 'ess-smart-equals)
+
+(defun espuds-add-to-chain (v)
+  "Add sequence v to the current action chain."
+  (setq espuds-action-chain (vconcat espuds-action-chain v)))
+
+(Setup
+ (when (boundp 'flymake-diagnostic-functions)
+   (remove-hook 'flymake-diagnostic-functions 'flymake-proc-legacy-flymake))
+ (require 'ess)
+ (setq ess-smart-equals-extra-ops '(brace paren percent))
+ (require 'ess-smart-equals)
+ (ess-smart-equals-activate))
 
 (Setup
  (when (boundp 'flymake-diagnostic-functions)
@@ -27,7 +39,7 @@
  (switch-to-buffer
   (get-buffer-create "*ess-smart-equals-tests*"))
  (erase-buffer)
- (R-mode)
+ (funcall ess-smart-equals-major-mode)
  (ess-smart-equals-mode 1))
 
 (After

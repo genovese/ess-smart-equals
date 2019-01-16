@@ -336,15 +336,15 @@ Returns the value of BODY and does not change point."
               (push (cons state (- len 1)) (map-elt partial ch)))
           (setq next-state (1+ next-state))))
       (setq op-index (1+ op-index)))
-    (essmeq--make-matcher ops
-                          :fsm (cl-map 'vector #'nreverse
-                                       (substring fsm 0 next-state))
-                          :span max-len
-                          :info (if data (vconcat data) nil)
-                          :partial (mapcar (lambda (x)
-                                             (cl-callf reverse (cdr x))
-                                             x)
-                                           (nreverse partial)))))
+    (essmeq-make-matcher ops
+                         :fsm (cl-map 'vector #'nreverse
+                                      (substring fsm 0 next-state))
+                         :span max-len
+                         :info (if data (vconcat data) nil)
+                         :partial (mapcar (lambda (x)
+                                            (cl-callf reverse (cdr x))
+                                            x)
+                                          (nreverse partial)))))
 
 (defun essmeq--match (fsm &optional pos bound)
   "Search backward to exactly match a string specified by machine FSM.
@@ -424,6 +424,12 @@ position where scanning started, as passed to this function."
         ;; don't move to failure above so farthest-start off by one
         (cl-list* accepted farthest-slen (1- farthest-start) pos)
       nil)))
+
+(defun essmeq--fallback (pos)
+  "Fallback completion at pos ATTN; what will this do in strings and comments"
+  (when-let ((matcher (map-elt essmeq--matcher-alist 'viable))) ;;ATTN:name
+    (essmeq--with-struct-slots essmeq-matcher (fsm targets span partial) matcher
+      (essmeq--complete fsm partial pos (- pos span)))))
 
 
 ;;; Key Configuration and Utilities
@@ -626,10 +632,13 @@ the next time the transient map in `ess-smart-equals' exits."
 (defcustom ess-smart-equals-contexts
   '((t (comment)
        (string)
-       (arglist "=" "==" "%>%")
+       (arglist "=" "==" "!=" "<=" ">=" "%>%")
        (index "==" "!=" "<=" "<" ">" ">=" "%in%" "=")
        (conditional "==" "!=" "<=" "<" ">" ">=" "%in%")
-       ;;(% "%%" "%/%" "%<>%" "%>%" "%*%" "%in%" "%o%" "%x%")
+       ;; base holds all operators that are assignment or complete with '='
+       (base "<-" "<<-" "=" "==" "!=" "<=" ">=" "->" "->>" ":=")
+       ;; Used for smart %-completion and cycling
+       (% "%%" "%/%" "%<>%" "%>%" "%*%" "%in%" "%o%" "%x%")
        (all "<-" "<<-" "=" "->" "->>"
             "==" "!=" "<" ">" "<=" ">="
             "%<>%" "%>%"
@@ -773,7 +782,7 @@ on both sides, usually either a single space or an empty string."
     (essmeq--with-struct-slots essmeq-matcher (fsm targets span partial) matcher
       (pcase-let ((`(,accepted ,slen ,start . ,_)
                    (or (essmeq--match fsm pos (- pos span))
-                       (and (not no-partial)
+                       (and (not no-partial) ;;ATTN: add fall back complete to 'viable context
                             (essmeq--complete fsm partial pos (- pos span)))))
                   (num-ops (length targets)))
         (cond
@@ -852,7 +861,7 @@ operator string as is."
       (forward-char 2)
       (ess-indent-command))))
 
-(defun essmeq--paren-tab ()
+(defun essmeq--paren-escape ()
   (interactive)
   (when (= (char-after) ?\ ) (delete-char 1))
   (ess-up-list))
@@ -865,7 +874,9 @@ operator string as is."
 
 (defvar essmeq--paren-map (let ((m (make-sparse-keymap)))
                             (define-key m (kbd ",") 'essmeq--paren-comma)
-                            (define-key m [?\t] 'essmeq--paren-tab) m)
+                            (define-key m (kbd ")") 'essmeq--paren-escape)
+                            (define-key m [?\t] 'essmeq--paren-escape)
+                            m)
   "Keymap active in fresh space in the middle of a new smart open paren.")
 
 (defun ess-smart-equals-open-paren (&optional literal)
@@ -875,9 +886,8 @@ a special keymap, where tab deletes the extra space and moves
 point out of the parentheses and comma inserts a spaced comma,
 keeping point on the special space character. "
   (interactive "P")
-  (if literal
+  (if (or literal (ess-inside-string-p)) ;; pairing in comments seems ok for now
       (self-insert-command (if (integerp literal) literal 1))
-    ;; ATTN: add a condition to test (ess-inside-string-or-comment-p)
     ;; Check syntax table for inferior-ess-r-mode for ', apparently not string
     (let ((skeleton-pair t)
           (skeleton-pair-alist '((?\( _ " "
@@ -886,6 +896,21 @@ keeping point on the special space character. "
                                           (1- pt) pt 'keymap essmeq--paren-map))
                                       ?\)))))
       (skeleton-pair-insert-maybe nil))))
+
+;;ATTN: Just an idea
+(defun ess-smart-equals-percent (&option literal)
+  "Completion and cycling through %-operators only, no context ATTN"
+    (interactive "P")
+  (if literal
+      (self-insert-command (if (integerp literal) literal 1))
+    (ess-smart-equals-set-overriding-context '%)
+    (essmeq--process)
+    (unless (eq last-command this-command)
+      (setq essmeq--stop-transient
+            (set-transient-map essmeq--transient-map
+                               #'essmeq--keep-transient
+                               ess-smart-equals-transient-exit-function))))
+  )
 
 
 ;;; Entry Points
