@@ -876,24 +876,44 @@ operator string as is."
     (indent-according-to-mode)))
 
 (defun essmeq--paren-expand ()
-  "Expand paren pair over next balanced expression, keep point on magic space."
+  "With point on magic space, expand region over following balanced expressions.
+This can be followed with `essmeq--paren-slurp' (C-;) to move
+those expressions inside the parentheses."
   (interactive)
-  (let* ((end-of-list (save-excursion (ess-up-list) (point)))
-         (token-end (save-excursion
-                      (goto-char end-of-list)
-                      (skip-syntax-forward " ")
-                      (delete-region end-of-list (point)) ;; ATTN: limit to one line??
-                      (ess-forward-sexp) ;; token?? sexp weird on '* 2'
-                      (- (point) 2)))
-         (yank-excluded-properties (remq 'keymap yank-excluded-properties)))
-    (kill-region (point) end-of-list)
-    (goto-char token-end)
-    (yank)
-    (forward-char -2)))
+  (save-excursion
+    (ess-up-list)
+    (mark-sexp nil t)))
 
+(defun essmeq--paren-slurp (&optional save-initial-space)
+  "Moves marked region following paren pair inside parentheses.
+Initial spaces following the end of the current paren pair are
+deleted unless a prefix argument is given (SAVE-INITIAL-SPACE
+non-nil). This is usually preceded by `essmeq--paren-expand' but
+applies to any region from point forward."
+  (interactive "P")
+  (when (and mark-active (> (mark) (point)))
+    (let* ((end-of-list (save-excursion (ess-up-list) (point)))
+           (delta-ws (if save-initial-space
+                         0
+                       (save-excursion
+                         (ess-up-list)
+                         (skip-syntax-forward " "))))
+           (end-of-slurp (- (mark) 2 delta-ws))
+           (yank-excluded-properties (remq 'keymap yank-excluded-properties)))
+      (unless save-initial-space
+        (delete-region end-of-list (+ end-of-list delta-ws)))
+      (kill-region (point) end-of-list)
+      (goto-char end-of-slurp)
+      (yank)
+      (forward-char -2))))
+
+
+;;ATTN: magic space killed with = operator. Can it be saved?
 (defvar essmeq--paren-map (let ((m (make-sparse-keymap)))
                             (define-key m (kbd ",") 'essmeq--paren-comma)
                             (define-key m (kbd ")") 'essmeq--paren-escape)
+                            (define-key m (kbd ";") 'essmeq--paren-expand)
+                            (define-key m (kbd "C-;") 'essmeq--paren-slurp)
                             (define-key m [?\t] 'essmeq--paren-escape)
                             m)
   "Keymap active in fresh space in the middle of a new smart open paren.")
@@ -916,20 +936,23 @@ keeping point on the special space character. "
                                       ?\)))))
       (skeleton-pair-insert-maybe nil))))
 
-;;ATTN: Just an idea
 (defun ess-smart-equals-percent (&option literal)
-  "Completion and cycling through %-operators only, no context ATTN"
+  "Completion and cycling through %-operators only, unless in comment or string.
+Outside a comment or string, this forces a % context as described
+in `ess-smart-equals-contexts', so the corresponding list can be
+customized to determine ordering. This should be bound to the `%'
+key."
     (interactive "P")
   (if literal
       (self-insert-command (if (integerp literal) literal 1))
-    (ess-smart-equals-set-overriding-context '%)
-    (essmeq--process)
-    (unless (eq last-command this-command)
-      (setq essmeq--stop-transient
-            (set-transient-map essmeq--transient-map
-                               #'essmeq--keep-transient
-                               ess-smart-equals-transient-exit-function))))
-  )
+    (unless (ess-inside-string-or-comment-p)
+      (ess-smart-equals-set-overriding-context '%)
+      (essmeq--process)
+      (unless (eq last-command this-command)
+        (setq essmeq--stop-transient
+              (set-transient-map essmeq--transient-map
+                                 #'essmeq--keep-transient
+                                 ess-smart-equals-transient-exit-function))))))
 
 
 ;;; Entry Points
