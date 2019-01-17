@@ -94,7 +94,7 @@
     (should (eq (essmeq--context 40) 'arglist))
     (should (eq (essmeq--context) t))
     (let ((ess-smart-equals-context-function (lambda () 'foo)))
-      (should (eq (essmew--context) 'foo)))
-    (let ((ess-smart-equals-overrriding-context 'bar))
-      (should (eq (essmew--context) 'foo)))))
+      (should (eq (essmeq--context) 'foo)))
+    (let ((ess-smart-equals-overriding-context 'bar))
+      (should (eq (essmeq--context) 'bar)))))
 

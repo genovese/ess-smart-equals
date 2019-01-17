@@ -633,14 +633,15 @@ the next time the transient map in `ess-smart-equals' exits."
   '((t (comment)
        (string)
        (arglist "=" "==" "!=" "<=" ">=" "%>%")
-       (index "==" "!=" "<=" "<" ">" ">=" "%in%" "=")
-       (conditional "==" "!=" "<=" "<" ">" ">=" "%in%")
+       (index "==" "!=" "%in%" "<" "<=" ">" ">=" "=")
+       ;; This order of inequalities makes cycling align with completion
+       (conditional "==" "!=" "<" "<=" ">" ">=" "%in%")
        ;; base holds all operators that are assignment or complete with '='
        (base "<-" "<<-" "=" "==" "!=" "<=" ">=" "->" "->>" ":=")
        ;; Used for smart %-completion and cycling
-       (% "%%" "%/%" "%<>%" "%>%" "%*%" "%in%" "%o%" "%x%")
+       (% "%%" "%/%" "%*%" "%in%" "%>%" "%<>%" "%o%" "%x%")
        (all "<-" "<<-" "=" "->" "->>"
-            "==" "!=" "<" ">" "<=" ">="
+            "==" "!=" "<" "<=" ">" ">=" 
             "%<>%" "%>%"
             "+" "*" "/" "%*%" "%%")
        (t "<-" "<<-" "=" "==" "->" "->>" "%<>%"))
@@ -862,15 +863,33 @@ operator string as is."
       (ess-indent-command))))
 
 (defun essmeq--paren-escape ()
+  "Escape paren pair, deleting magic space if starting there."
   (interactive)
   (when (= (char-after) ?\ ) (delete-char 1))
   (ess-up-list))
 
 (defun essmeq--paren-comma ()
+  "Insert spaced comma, keeping point on magic space."
   (interactive)
   (insert ", ")
   (unless (derived-mode-p 'inferior-ess-mode)
     (indent-according-to-mode)))
+
+(defun essmeq--paren-expand ()
+  "Expand paren pair over next balanced expression, keep point on magic space."
+  (interactive)
+  (let* ((end-of-list (save-excursion (ess-up-list) (point)))
+         (token-end (save-excursion
+                      (goto-char end-of-list)
+                      (skip-syntax-forward " ")
+                      (delete-region end-of-list (point)) ;; ATTN: limit to one line??
+                      (ess-forward-sexp) ;; token?? sexp weird on '* 2'
+                      (- (point) 2)))
+         (yank-excluded-properties (remq 'keymap yank-excluded-properties)))
+    (kill-region (point) end-of-list)
+    (goto-char token-end)
+    (yank)
+    (forward-char -2)))
 
 (defvar essmeq--paren-map (let ((m (make-sparse-keymap)))
                             (define-key m (kbd ",") 'essmeq--paren-comma)
@@ -890,7 +909,7 @@ keeping point on the special space character. "
       (self-insert-command (if (integerp literal) literal 1))
     ;; Check syntax table for inferior-ess-r-mode for ', apparently not string
     (let ((skeleton-pair t)
-          (skeleton-pair-alist '((?\( _ " "
+          (skeleton-pair-alist '((?\( _ _ " "
                                       '(let ((pt (point)))
                                          (put-text-property
                                           (1- pt) pt 'keymap essmeq--paren-map))

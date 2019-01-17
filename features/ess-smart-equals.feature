@@ -54,7 +54,7 @@ Feature: Use equals in R source code
     When I type "if( a"
     And I repeat "=" 3 times
     And I type "42 )"
-    Then I should see "if( a <= 42 )"
+    Then I should see "if( a < 42 )"
 
   Scenario: Enter equals several times that should cyclically expand to geq comparison
     Given I turn on ess-smart-equals

@@ -5,6 +5,7 @@
 (depends-on "ess")
 
 (development
+ (depends-on "s")
  (depends-on "f")
  (depends-on "ecukes")
  (depends-on "espuds")
