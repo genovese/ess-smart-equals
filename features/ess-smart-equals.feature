@@ -100,10 +100,10 @@ Feature: Use equals in R source code
     And I type "=42,]"
     Then I should see "a[u == 42,]"
 
-  Scenario: Enter equals in index that should complete to in comparison
+  Scenario: Enter equals in index that should complete to .in. comparison
     Given I turn on ess-smart-equals
     When I insert "a[u"
-    And I repeat "=" 7 times
+    And I repeat "=" 3 times
     And I type "v, ]"
     Then I should see "a[u %in% v, ]"
 

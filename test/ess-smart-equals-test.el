@@ -98,3 +98,109 @@
     (let ((ess-smart-equals-overriding-context 'bar))
       (should (eq (essmeq--context) 'bar)))))
 
+(defmacro ess-smart-equals-th/replace-region
+    (line left right text beg end &rest body )
+  "Construct a single `essmeq--replace-region' test."
+  (declare (indent 3))
+  `(progn
+     (erase-buffer)
+     (insert "A0123456789ABCDEFGHIJKLM\n")
+     (insert "A0123456789ABCDEFGHIJKLM\n")
+     (insert "A0123456789ABCDEFGHIJKLM\n")
+     (insert "A0        123456789ABCDEFGHIJKLM\n")
+     (insert "A0        123456789ABCDEFGHIJKLM\n")
+     (insert "A0        123456789ABCDEFGHIJKLM\n")
+     (insert "A0  123456789ABCDEFGHIJKLM\n")
+     (insert "A0  123456789ABCDEFGHIJKLM\n")
+     (insert "A0  123456789ABCDEFGHIJKLM\n")
+     (insert "A0123456789ABCDEFGHIJKLM\n")
+     (insert "A0123456789ABCDEFGHIJKLM\n")
+     (insert "A0123456789ABCDEFGHIJKLM\n")
+     (goto-char (point-min))
+     (save-excursion
+       (goto-char (line-beginning-position ,line))
+       (let ((ess-smart-equals-padding-left ,left)
+             (ess-smart-equals-padding-right ,right))
+         (essmeq--replace-region ,text (+ (point) ,beg) (+ (point) ,end))
+         ,@body))))
+
+(ert-deftest ess-smart-equals/replace-region ()
+  "Test essmeq--replace-region under various settings."
+  (with-ess-buffer
+    (ess-smart-equals-th/replace-region 1 'one-space 'one-space
+      "<-" 2 2
+      (should (looking-at-p ".0 <- 12")))
+    (ess-smart-equals-th/replace-region 2 'one-space 'one-space
+      "<-" 2 2
+      (should (looking-at-p ".0 <- 12")))
+    (ess-smart-equals-th/replace-region 1 'some-space 'some-space
+      "<-" 2 2
+      (should (looking-at-p ".0 <- 12")))
+    (ess-smart-equals-th/replace-region 1 'no-space 'no-space
+      "<-" 2 2
+      (should (looking-at-p ".0<-12")))
+    (ess-smart-equals-th/replace-region 1 'none 'none
+      "<-" 2 2
+      (should (looking-at-p ".0<-12")))
+    (ess-smart-equals-th/replace-region 1 'none "ZZZ"
+      "<-" 2 2
+      (should (looking-at-p ".0<-ZZZ12")))
+    (ess-smart-equals-th/replace-region 1 "ZZZ" 'none
+      "<-" 2 2
+      (should (looking-at-p ".0ZZZ<-12")))
+    (ess-smart-equals-th/replace-region 1 "ZZZ" 'one-space
+      "<-" 2 2
+      (should (looking-at-p ".0ZZZ<- 12")))
+    (ess-smart-equals-th/replace-region 1 'one-space (lambda (e ews &optional f)
+                                                       (if f
+                                                           (cons e (+ e 3))
+                                                         (goto-char e)
+                                                         (insert "===")))
+      "<-" 2 2
+      (should (looking-at-p ".0 <-===12")))
+    (ess-smart-equals-th/replace-region 1 (lambda (bws b &optional f)
+                                                       (if f
+                                                           (cons (- b 3) b)
+                                                         (goto-char b)
+                                                         (insert "===")))
+                                        'one-space
+      "<-" 2 2
+      (should (looking-at-p ".0===<- 12")))
+    (ess-smart-equals-th/replace-region 1 'one-space (lambda (e ews &optional f)
+                                                       (if f
+                                                           (cons e (+ e 3))
+                                                         (goto-char e)
+                                                         (insert "===")))
+      "<-" 2 3
+      (should (looking-at-p ".0 <-===23")))
+    (ess-smart-equals-th/replace-region 5 'one-space 'one-space
+      "<-" 5 5
+      (should (looking-at-p ".0 <- 12")))
+    (ess-smart-equals-th/replace-region 4 'some-space 'some-space
+      "<-" 5 5
+      (should (looking-at-p ".0   <-     12")))
+    (ess-smart-equals-th/replace-region 4 'no-space 'no-space
+      "<-" 5 5
+      (should (looking-at-p ".0<-12")))
+    (ess-smart-equals-th/replace-region 4 'none 'none
+      "<-" 5 5
+      (should (looking-at-p ".0   <-     12")))
+    (ess-smart-equals-th/replace-region 4 'no-space 'no-space
+      "<-" 3 10
+      (should (looking-at-p ".0<-12")))
+    (ess-smart-equals-th/replace-region 4 'one-space 'no-space
+      "<-" 2 10
+      (should (looking-at-p ".0 <-12")))
+    (ess-smart-equals-th/replace-region 4 'one-space 'one-space
+      "<-" 1 11
+      (should (looking-at-p "A <- 2")))
+    (ess-smart-equals-th/replace-region 5 (lambda (bws b &optional f)
+                                            (if f
+                                                (cons (- b 3) b)
+                                              (goto-char b)
+                                              (insert "===")))
+                                        'one-space
+      "<-" 5 5
+      (should (looking-at-p ".0   ===<- 12")))
+    ))
+

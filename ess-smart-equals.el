@@ -184,6 +184,7 @@
 
 (eval-when-compile (require 'cl-lib))
 (eval-when-compile (require 'subr-x))
+(eval-when-compile (require 'pcase))
 (require 'map)
 (require 'skeleton)
 
@@ -294,18 +295,7 @@ the marker is created with the corresponding `point-marker',
          ,@(mapcar (lambda (m) `(set-marker ,m nil)) marker-symbols)))))
 
 
-;;; Utility Functions
-
-(defun essmeq--replace-region (text start &optional end padding)
-  (save-excursion
-    (goto-char start)
-    (when end (delete-region start end))
-    (let ((padding (or padding "")))
-      (insert padding text padding)
-      (point))))
-
-(defun essmeq--after-whitespace-p (&optional pos)
-  (eq (char-syntax (char-before pos)) ?\ ))
+;;; Marker Interface
 
 (defun essmeq-make-marker (&optional position type init)
   "Like `make-marker' but also optionally initializes POSITION and TYPE.
@@ -328,6 +318,135 @@ Returns the initialized marker."
 (defsubst essmeq-clear-marker (marker)
   "Reset MARKER so that it points nowhere and does not affect current buffer."
   (set-marker marker nil))
+
+
+;;; Buffer Contents
+
+(defun essmeq--whitespace-span-forward (&optional position)
+  "Scan forward from POSITION to the end of contiguous whitespace.
+Return the position after contiguous whitespace but stopping at
+any character with a non-nil `essmeq--magic-space' text property.
+POS defaults to point."
+  (let ((pos (or position (point))))
+    (save-excursion
+      (when position (goto-char pos))
+      (skip-syntax-forward " ")
+      (let* ((after-ws (point))
+             (magic-pos (text-property-any pos after-ws 'essmeq--magic-space t)))
+        (or magic-pos after-ws)))))
+
+(defun essmeq--whitespace-span-backward (&optional position)
+  "Scan backward from POSITION to the beginning of contiguous whitespace.
+Return the position at the start of contiguous whitespace. POS
+defaults to point."
+  (let ((pos (or position (point))))
+    (save-excursion
+      (when position (goto-char pos))
+      (skip-syntax-backward " ")
+      (point))))
+
+(defun essmeq--find-padded-region (beg end)
+  "Find the padding extent for unpadded text spanning BEG..END in current buffer.
+The assumption is that the text has been inserted with padding
+according to the padding rules specified by
+`ess-smart-equals-padding-left' and
+`ess-smart-equals-padding-right', which see. This assumption is
+not checked; specifically, this does not check that BEG..END is
+free of spaces nor that the padding characters around that region
+are correct.
+
+Return (BEG' . END') where BEG' and END' are the beginning and ending 
+positions of the padded region BEG..END under the padding rules."
+  (cons
+   (cond ;; left padding (must come second to avoid affecting end)
+    ((memq ess-smart-equals-padding-left '(one-space some-space))
+     (1- beg))
+    ((memq ess-smart-equals-padding-left '(no-space none))
+     beg)
+    ((stringp ess-smart-equals-padding-left)
+     (- beg (length ess-smart-equals-padding-left)))
+    ((functionp ess-smart-equals-padding-left)
+     (funcall ess-smart-equals-padding-left beg beg t)))
+   (cond ;; right padding
+    ((memq ess-smart-equals-padding-right '(one-space some-space))
+     (1+ end))
+    ((memq ess-smart-equals-padding-right '(no-space none))
+     end)
+    ((stringp ess-smart-equals-padding-right)
+     (+ end (length ess-smart-equals-padding-right)))
+    ((functionp ess-smart-equals-padding-right)
+     (funcall ess-smart-equals-padding-right end end t)))))
+
+(defun essmeq--normalize-padding (beg end)
+  "Adjust space padding on either side of BEG and END in the current buffer.
+Return (BEG' . END') where BEG' and END' are the beginning and ending 
+positions of the padded region BEG..END that account for insertions
+and deletions.
+
+The type of padding used, if any, on each side is determined by
+the values of the options `ess-smart-equals-padding-left' and
+`ess-smart-equals-padding-right', which see."
+  (let ((beg-ws (essmeq--whitespace-span-backward beg))
+        (end-ws (essmeq--whitespace-span-forward end)))
+    (essmeq--with-markers ((mbeg beg) (mend end t))
+      (cond ;; right padding
+       ((eq ess-smart-equals-padding-right 'one-space)
+        (delete-region end end-ws)
+        (save-excursion (goto-char mend) (insert " ")))
+       ((eq ess-smart-equals-padding-right 'some-space)
+        (unless (> end-ws end)
+          (save-excursion (goto-char mend) (insert " "))))
+       ((eq ess-smart-equals-padding-right 'no-space)
+        (delete-region end end-ws))
+       ((eq ess-smart-equals-padding-right 'none))
+       ((stringp ess-smart-equals-padding-right)
+        (save-excursion
+          (goto-char mend)
+          (insert ess-smart-equals-padding-right)))
+       ((functionp ess-smart-equals-padding-right)
+        (save-excursion
+          (goto-char mend)
+          (funcall ess-smart-equals-padding-right end end-ws))))
+      (cond ;; left padding (must come second to avoid affecting end)
+       ((eq ess-smart-equals-padding-left 'one-space)
+        (delete-region beg-ws beg)
+        (save-excursion (goto-char mbeg) (insert " ")))
+       ((eq ess-smart-equals-padding-left 'some-space)
+        (unless (< beg-ws beg)
+          (save-excursion (goto-char mbeg) (insert " "))))
+       ((eq ess-smart-equals-padding-left 'no-space)
+        (delete-region beg-ws beg))
+       ((eq ess-smart-equals-padding-left 'none))
+       ((stringp ess-smart-equals-padding-left)
+        (save-excursion
+          (goto-char mbeg)
+          (insert ess-smart-equals-padding-left)))
+       ((functionp ess-smart-equals-padding-left)
+        (save-excursion
+          (goto-char mbeg)
+          (funcall ess-smart-equals-padding-left beg-ws beg))))
+      (cons (marker-position mbeg) (marker-position mend)))))
+
+(defun essmeq--replace-region (text start end &optional ignore-padding)
+  "Replace region START..END with TEXT plus optional padding in current buffer.
+Padding is determined by customization options as in
+`essmeq--normalize-padding', but if IGNORE-PADDING is non-nil,
+these settings are ignored and no padding is added.
+
+Return (TSTART . TEND) giving, respectively, the starting and ending
+positions of the (padded) text."
+  (essmeq--with-markers ((mstart start) (mend end t))
+    (delete-region mstart mend)
+    (save-excursion
+      (goto-char mstart)
+      (insert text))
+    (if ignore-padding
+        (cons (marker-position mstart) (marker-position mend))
+      (essmeq--normalize-padding mstart mend))))
+
+(defun essmeq--after-whitespace-p (&optional pos)
+  "Does POS (point by default) follow a whitespace character?"
+  (eq (char-syntax (char-before pos)) ?\ ))
 
 
 ;;; Finite-State Machine for Operator Matching
@@ -629,14 +748,111 @@ This should not usually need to be done explicitly by the user."
 
 ;;; Behavior Configuration 
 
-(defvar ess-smart-equals-padding-left 'one-space
-  "ATTN:Convert to defcustom once solidified")
-  ;; padding options for left and right
-  ;; no-space, one-space, at-least-one-space, "literal string",
-  ;; nil (or any other value) means to leave the space as is
+(defcustom ess-smart-equals-padding-left 'one-space
+  "Specifies padding used on left side of inserted and completed operators.
 
-(defvar ess-smart-equals-padding-right 'one-space
-  "ATTN:Convert to defcustom once solidified")
+This can have one of the following values:
+
+   * The symbol `one-space' means to insert exactly one space, eliminating
+     any other contiguous whitespace on the left.
+
+   * The symbol `no-space' means to eliminate all adjacent whitespace on
+     the left.
+
+   * The symbol `some-space' means to ensure there is at least one space
+     on the left, either in existing whitespace (which is kept as is)
+     or by inserting a space if none.
+
+   * The symbol `none' means to insert no padding and make no change
+     to the surrounding whitespace. (A nil value has the same effect
+     but is marginally slower.)
+
+   * A string means to insert that string on the left.
+
+   * A function with signature (begin-ws begin &optional extent)
+
+     When inserting or completing an operator this function
+     should insert desired padding on the right. The function is
+     called within a `save-excursion', so point can be moved and
+     insertions made. In this case, the function is called with
+     two positions: BEGIN-WS is the position of the leftmost
+     contiguous whitespace character to the left of the operator
+     and BEGIN is the position of the left side of the operator.
+
+     When removing an operator, this function should return the
+     beginning of the padded region assuming that an operator has
+     just been inserted and padded (i.e., by calling this
+     function). It should not change the current buffer. This
+     case is distinguished by having the third argument EXTENT eq
+     to t and *both* BEGIN-WS and BEGIN pointing to the leftmost
+     point of the inserted operator.
+"
+  :group 'ess-edit
+  :type '(choice (const :tag "Only One Space" one-space)
+                 (const :tag "No Spaces" no-space)
+                 (const :tag "At Least One Space" some-space)
+                 (const :tag "No Padding" none)
+                 string
+                 function))
+
+(defcustom ess-smart-equals-padding-right 'one-space
+  "Specifies padding used on right side of inserted and completed operators.
+
+This can have one of the following values:
+
+   * The symbol `one-space' means to insert exactly one space, eliminating
+     any other contiguous whitespace on the right.
+
+   * The symbol `no-space' means to eliminate all adjacent whitespace on
+     the right.
+
+   * The symbol `some-space' means to ensure there is at least one space
+     on the right, either in existing whitespace (which is kept as is)
+     or by inserting a space if none.
+
+   * The symbol `none' means to insert no padding and make no change
+     to the surrounding whitespace. (A nil value has the same effect
+     but is marginally slower.)
+
+   * A string means to insert that string on the right.
+
+   * A function with signature (end end-ws &optional extent)
+
+     When inserting or completing an operator this function
+     should insert desired padding on the right. The function is
+     called within a `save-excursion', so point can be moved and
+     insertions made. In this case, the function is called with
+     two positions: END is the position of the right side of the
+     inserted operator and END-WS is the position of the
+     rightmost contiguous whitespace character to the right of
+     the operator.
+
+     When removing an operator, this function should return the
+     beginning of the padded region assuming that an operator has
+     just been inserted and padded (i.e., by calling this
+     function). It should not change the current buffer. This
+     case is distinguished by having the third argument EXTENT eq
+     to t and *both* END and END-WS pointing to the rightmost
+     point of the inserted operator.
+"
+  :group 'ess-edit
+  :type '(choice (const :tag "Only One Space" one-space)
+                 (const :tag "No Spaces" no-space)
+                 (const :tag "At Least One Space" some-space)
+                 (const :tag "No Padding" none)
+                 string
+                 function))
+
+(defcustom ess-smart-equals-narrow-function nil
+  "If non-nil, a nullary function to restrict syntax checking to a region.
+This is useful in cases such as `inferior-ess-r-mode' where
+attention should be focused on a prompt line or the region
+between prompts, both for efficiency and because output or
+erroneous input on earlier prompts can confuse the syntax
+checker. See `ess-smart-equals-repl-narrow' and
+`ess-smart-equals-options'."
+  :group 'ess-edit
+  :type '(choice (const :tag "None" nil) function))
 
 (defcustom ess-smart-equals-insertion-hook nil
   "A function called when an operator is inserted into the current buffer.
@@ -656,7 +872,7 @@ space.
 
 This feature is experimental and may be removed in a future version."
   :group 'ess-edit
-  :type 'function)
+  :type '(choice (const :tag "None" nil) function))
 
 (defcustom ess-smart-equals-default-modes
   '(ess-r-mode inferior-ess-r-mode ess-r-transcript-mode ess-roxy-mode)
@@ -721,7 +937,7 @@ the next time the transient map in `ess-smart-equals' exits."
 ;;; Context and Matcher Configuration and Utilities
 
 (defun essmeq--build-matchers (context-alist)
-  ""
+  "ATTN"
   (declare (pure t) (side-effect-free t))
   (let (matchers
         (car-or-id (lambda (x) (if (consp x) (car x) x))))
@@ -875,153 +1091,112 @@ limit to matches to the %-operators."
         'arglist))
      (t))))
 
-;;ATTN: experimental example of reading current % operators from R
-;;      for use in contexts if we have a function
-;;      Note: should replace the replace-* calls later but for now
-;;      this is a proof of concept; can actually just search for
-;;      the "(%.*%)" and accumulate and nreverse the list of them
-;;      this also illustrates how to interact with the r process
-;;      when needed
 (defun essmeq--percent-operators ()
-  ""
+  "Insertion and completion for %-specific operators."
   (let ((proc (if (derived-mode-p 'inferior-ess-mode)
                   (get-buffer-process (current-buffer))
                 (ess-get-next-available-process)))
         (cmd (format
               "unique(sort(%s))\n"
-              "unlist(Map(function(s){ls(s, pattern='%.*%')}, search()))")))
+              "unlist(Map(function(s){ls(s, pattern='%.*%')}, search()))"))
+        ops)
     (if (not proc)
         '("default list ATTN")
       (with-temp-buffer
         (ess-command cmd (current-buffer) nil nil nil proc)
         (goto-char (point-min))
-        (replace-regexp "\\(?:^[^\"]*\"%\\|%\" *$\\)" "%")
-        (replace-regexp "%\"  *\"%" "% %" nil (point-min) (point-max))
-        (replace-string "\n" " " nil (point-min) (point-max))
-        (split-string
-         (buffer-substring-no-properties (point-min) (point-max)))))))
+        (while (search-forward-regexp "\"\\(%[^%]*%\\)\"" nil t)
+          (push (match-string 1) ops))
+        (nreverse ops)))))
 
 
 
 ;;; Processing the Action Key
-
-(defun essmeq--whitespace-span (pos &optional backward)
-  "Scan from POS to the end of contiguous whitespace.
-The scan is forward unless BACKWARD is non-nil. For the forward scan only,
-stop upon encountering a character with a non-nil `essmeq--magic-space'
-property.
-
-Return (START . END) positions for the scanned sequence."
-  (save-excursion
-    (goto-char pos)
-    (if backward
-        (progn
-          (skip-syntax-backward " ")
-          (cons (point) pos))
-      (skip-syntax-forward " ")
-      (let* ((after-ws (point))
-             (magic-pos (text-property-any pos after-ws 'essmeq--magic-space t)))
-        (cons pos (or magic-pos after-ws))))))
-
-(defun essmeq--normalize-padding (beg end)
-  "Adjust space padding on either side of BEG and END in the current buffer.
-The spaces used are determined by the values of the options
-`ess-smart-equals-padding-left' and
-`ess-smart-equals-padding-right', which see."
-  (essmeq--with-markers ((mbeg beg t) (mend end))
-    (pcase-let ((`(,start-ws . ,end-ws) (essmeq--whitespace-span end)))
-      (cond
-       ((eq ess-smart-equals-padding-left 'one-space)
-        (delete-region start-ws end-ws)
-        (save-excursion (goto-char mend) (insert " ")))
-       ((eq ess-smart-equals-padding-left 'at-least-one-space)
-        (unless (> end-ws start-ws)
-          (save-excursion (goto-char mend) (insert " "))))
-       ((eq ess-smart-equals-padding-left 'no-space)
-        (delete-region start-ws end-ws))
-       ((stringp ess-smart-equals-padding-left)
-        (save-excursion (goto-char mend) (insert ess-smart-equals-padding-left)))
-       (t)))
-    (pcase-let ((`(,start-ws . ,end-ws) (essmeq--whitespace-span beg 'backward)))
-      (save-excursion
-        (goto-char mbeg)
-        (cond
-         ((eq ess-smart-equals-padding-right 'one-space)
-          (delete-region start-ws end-ws)
-          (insert " "))
-         ((eq ess-smart-equals-padding-right 'at-least-one-space)
-          (unless (> end-ws start-ws)
-            (insert " ")))
-         ((eq ess-smart-equals-padding-right 'no-space)
-          (delete-region start-ws end-ws))
-         ((stringp ess-smart-equals-padding-right)
-          (insert ess-smart-equals-padding-right))
-         (t))))
-    (cons (essmeq-copy-marker mbeg t) (essmeq-copy-marker mend))))
 
 (defun essmeq--search (&optional initial-pos no-partial)
   "Search backwards for an operator matching the current context.
 Search is anchored at INITIAL-POS, or point if nil. If NO-PARTIAL
 is nil, then partial matches of a prefix of relevant operators
 strings are allowed. Returns a list (CONTEXT MTYPE STRING START
-END PADDING), where CONTEXT is a context symbol in
-`ess-smart-equals-contexts'; MTYPE is a keyword among :exact,
-:partial, :literal (for literal '=' insertion), and :no-match;
-STRING is the operator string to be inserted, replacing the
-region between START and END. END is non-nil unless MTYPE is
-:literal. Finally, PAD is the string padding the actual operator
-on both sides, usually either a single space or an empty string."
+END IGNORE-PADDING), where CONTEXT is a context symbol in
+`ess-smart-equals-contexts'; MTYPE is one of the keyword :exact,
+a positive integer indicating a partial match, :literal (for
+literal '=' insertion), and :no-match; STRING is the operator
+string to be inserted, replacing the region between START and
+END. Finally, IGNORE-PADDING is non-nil when padding options
+should be ignored."
+  ;; Putting an integer rather than :partial in the return list is a
+  ;; practical choice, if somewhat obscure, to make it easier to use
+  ;; downstream, e.g., in essmeq--replace-region. The alternative is
+  ;; to add the integer to the result list for all the other cases,
+  ;; a more straightforward but less convenient choice.
   (let* ((pt (or initial-pos (point)))
-         (pos0 (save-excursion
-                 (when initial-pos (goto-char pt))
-                 (+ pt (skip-syntax-forward " "))))
          (pos (save-excursion
-                (goto-char pos0)
-                (+ pos0 (skip-syntax-backward " "))))
-         (context (essmeq--context pos0))
+                (when initial-pos (goto-char pt))
+                (+ pt (skip-syntax-backward " "))))
+         (context (essmeq--context pos))
          (matcher (map-elt essmeq--matcher-alist context)))
-    (essmeq--with-struct-slots essmeq-matcher (fsm targets span partial) matcher
-      (pcase-let ((`(,accepted ,slen ,start . ,_)
-                   (or (essmeq--match fsm pos (- pos span))
-                       (and (not no-partial) ;;ATTN: add fall back complete to 'viable context
-                            (essmeq--complete fsm partial pos (- pos span)))))
-                  (num-ops (length targets)))
-        (cond
-         (accepted (let* ((op (if (zerop slen)
-                                  (mod (1+ accepted) num-ops)
-                                accepted))
-                          (mtype (if (zerop slen) :exact :partial))
-                          (op-string (aref targets op))
-                          (ws-start (if (essmeq--after-whitespace-p start)
-                                        (1- start)
-                                      start)))
-                     (list context mtype op-string ws-start pos0 " ")))
-         ((zerop num-ops) (list context :literal "=" pt))
-         (t (list context :no-match (aref targets 0) pos pos0 " ")))))))
+    (essmeq--with-matcher (fsm targets span partial) matcher
+      (if-let* ((num-ops (length targets)) ;; ATTN: this will be max-cycle,
+                ((> num-ops 0)) ;;       and can get rid of num-ops
+                (limit (- pos span)))
+          (pcase-let ((`(,accepted ,slen ,start . ,_)
+                       (or (essmeq--match fsm pos limit)
+                           (and (not no-partial)
+                                (or (essmeq--complete fsm partial pos limit)
+                                    (essmeq--fallback pos)))))) 
+            (if accepted
+                (let* ((op (if (zerop slen)
+                               (mod (1+ accepted) num-ops)
+                             accepted))
+                       (mtype (if (zerop slen) :exact slen))
+                       (op-string (aref targets op)))
+                  (list context mtype op-string start pos))
+              (list context :no-match (aref targets 0) pos pos)))
+        (list context :literal "=" pt pt t)))))
+
+(defvar essmeq--last-search nil
+  "Result of the last operator search via `essmeq--search' or nil if none.
+This is set only in `essmeq--process'.")
 
 (defun essmeq--process (&optional no-partial)
   "Insert, cycle, or complete an operator at point based on context.
 Point ends up at the end of the inserted string. Calls
 `ess-smart-equals-insertion-hook' on the result of the
 search (see `essmeq--search') if the hook is non-nil."
-  (let* ((match (essmeq--search (point) no-partial))
-         (spec (cddr match)))
-    (goto-char (apply #'essmeq--replace-region spec))
-    (when ess-smart-equals-insertion-hook
-      (apply ess-smart-equals-insertion-hook spec))))
+  (save-restriction
+    (when ess-smart-equals-narrow-function
+      (funcall ess-smart-equals-narrow-function))
+    (let* ((match (essmeq--search (point) no-partial))
+           (spec (cddr match)))
+      (thread-last spec
+        (apply #'essmeq--replace-region)
+        cdr ;; end position after padding
+        goto-char)
+      (setq essmeq--last-search match)
+      (when ess-smart-equals-insertion-hook
+        (apply ess-smart-equals-insertion-hook spec)))))
 
 (defun essmeq--remove ()
   "Remove a matching operator at point based on context, else one character."
   (interactive)
-  (let* ((match (cdr (essmeq--search nil t)))
+  (let* ((match (cdr (or essmeq--last-search (essmeq--search nil t))))
          (mtype (car match))
-         (start (caddr match))
+         (beg (caddr match))
          (end (cadddr match)))
-    (if-let (((eq mtype :exact))
-             (end+ws (1+ end))) ;; end not nil in :exact case
-        (essmeq--replace-region
-         "" start (if (essmeq--after-whitespace-p end+ws) end+ws end))
-      (delete-char -1))))
+    (cond
+     ((eq mtype :exact)
+      (let ((padded (essmeq--find-padded-region beg end)))
+        (thread-first (essmeq--replace-region "" (car padded) (cdr padded) t)
+          cdr
+          goto-char)))
+     ((integerp mtype)
+      (let ((padded (essmeq--find-padded-region beg end)))
+        (thread-first (essmeq--replace-region "" (- end mtype) (cdr padded) t)
+          cdr
+          goto-char)))
+     (t
+      (delete-char -1)))))
 
 (defun essmeq--selected (op-string)
   "Insert operator string at point with padding, replacing existing operator.
@@ -1034,13 +1209,15 @@ operator string as is."
                                         (mapcar #'cdr)
                                         (apply #'append)
                                         delete-dups))))
-  (let* ((match (cdr (essmeq--search nil t)))
+  (let* ((match (cdr (or essmeq--last-search (essmeq--search nil t))))
          (mtype (car match))
-         (start (caddr match))
+         (beg (caddr match))
          (end (cadddr match)))
-    (if (or (eq mtype :exact) (eq mtype :no-match))
-        (let ((end* (if (essmeq--after-whitespace-p (1+ end)) (1+ end) end)))
-          (goto-char (essmeq--replace-region op-string start end* " ")))
+    (if (or (eq mtype :exact) (eq mtype :no-match) (integerp mtype))
+        (let ((pad (essmeq--find-padded-region beg end)))
+          (thread-first (essmeq--replace-region op-string (car pad) (cdr pad))
+            cdr
+            goto-char))
       (insert op-string))))
 
 
@@ -1117,7 +1294,7 @@ applies to any region from point forward."
                             (define-key m [?\t] 'essmeq--paren-escape)
                             m)
   "Keymap active in fresh space in the middle of a new smart open paren.")
-(fset 'essmeq--paren-map esseq--paren-map)
+(fset 'essmeq--paren-map essmeq--paren-map)
 
 (defun ess-smart-equals-open-paren (&optional literal)
   "Inserts properly a properly spaced paren pair with an active keymap inside.
@@ -1132,19 +1309,20 @@ keeping point on the special space character. "
     (let ((skeleton-pair t)
           (skeleton-pair-alist '((?\( _ _ " "
                                       '(let ((pt (point)))
-                                         (add-text-properties (1- pt) pt
-                                          'essmeq--magic-space t
-                                          'keymap 'essmeq--paren-map))
+                                         (add-text-properties
+                                          (1- pt) pt
+                                          '(essmeq--magic-space t
+                                            keymap essmeq--paren-map)))
                                       ?\)))))
       (skeleton-pair-insert-maybe nil))))
 
-(defun ess-smart-equals-percent (&option literal)
+(defun ess-smart-equals-percent (&optional literal)
   "Completion and cycling through %-operators only, unless in comment or string.
 Outside a comment or string, this forces a % context as described
 in `ess-smart-equals-contexts', so the corresponding list can be
 customized to determine ordering. This should be bound to the `%'
 key."
-    (interactive "P")
+  (interactive "P")
   (if literal
       (self-insert-command (if (integerp literal) literal 1))
     (unless (ess-inside-string-or-comment-p)

@@ -30,6 +30,10 @@
 (ess-smart-equals-activate)
 
 (defmacro with-ess-buffer (&rest body)
+  "Do BODY in a temporary buffer with an ESS major mode and smart-equals-mode.
+The variable `ess-smart-equals-major-mode' determines which ESS
+major mode is invoked."
+  (declare (indent 0))
   `(with-temp-buffer
      (funcall ess-smart-equals-major-mode)
      (ess-smart-equals-mode 1)
