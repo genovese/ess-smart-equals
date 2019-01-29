@@ -108,11 +108,12 @@
 ;;   As a bonus, the value of the variable
 ;;   `ess-smart-equals-extra-ops' when this package is loaded,
 ;;   determines some other smart operators that may prove useful.
-;;   Currently, only `brace' and `paren' are supported, causing
-;;   `ess-smart-equals-open-brace' and `ess-smart-equals-open-paren'
-;;   to be bound to '{' and '(', respectively. These configurably
-;;   places a properly indented and spaced matching pair at point or
-;;   around the region if active. See also
+;;   Currently, only `brace', `paren', and `percent' are supported,
+;;   causing `ess-smart-equals-open-brace',
+;;   `ess-smart-equals-open-paren', and `ess-smart-equals-smart-percent'
+;;   to be bound to '{', '(', and '%', respectively. These
+;;   configurably places a properly indented and spaced matching
+;;   pair at point or around the region if active. See also
 ;;   `ess-smart-equals-brace-newlines'.
 ;;
 ;;   Finally, the primary user facing functions are named with a
@@ -157,7 +158,7 @@
 ;;  automatically, you can replace this with
 ;;
 ;;      (use-package ess-smart-equals
-;;        :init   (setq ess-smart-equals-extra-ops '(brace paren))
+;;        :init   (setq ess-smart-equals-extra-ops '(brace paren percent))
 ;;        :after  (:any ess-r-mode inferior-ess-r-mode ess-r-transcript-mode)
 ;;        :config (ess-smart-equals-activate))
 ;;
@@ -537,7 +538,7 @@ positions of the (padded) text."
                     (in-state (aref fsm state))
                     (goto (assoc ch in-state)))
               (setq state (cadr goto)) ; transition exists, follow it 
-            (push (list* ch next-state nil) (aref fsm state)) ; new state
+            (push (cl-list* ch next-state nil) (aref fsm state)) ; new state
             (when (> state 0)  ; goto for partial match
               (push (cons state (- len ind 1)) (map-elt partial ch))) 
             (setq state next-state
@@ -547,7 +548,7 @@ positions of the (padded) text."
                   (in-state (aref fsm state))
                   (goto (assoc ch in-state)))
             (setf (cddr goto) op-index) ; transition exists, accept it
-          (push (list* ch next-state op-index) (aref fsm state)) ; new accept
+          (push (cl-list* ch next-state op-index) (aref fsm state)) ; new accept
           (when (> state 0)   ; goto for partial match
               (push (cons state (- len 1)) (map-elt partial ch)))
           (setq next-state (1+ next-state))))
@@ -725,6 +726,8 @@ clear the last insertion. It defaults to
       (define-key map "{" 'ess-smart-equals-open-brace))
     (when (memq 'paren ess-smart-equals-extra-ops)
       (define-key map "(" 'ess-smart-equals-open-paren))
+    (when (memq 'percent ess-smart-equals-extra-ops)
+      (define-key map "%" 'ess-smart-equals-smart-percent))
     map))
 
 (defvar ess-smart-equals-mode-map (essmeq--make-mode-map)
@@ -734,7 +737,7 @@ clear the last insertion. It defaults to
   "Map bound transiently after `ess-smart-equals' key is pressed.
 The map continues to be active as long as that key is pressed.")
 
-(defun emacs-smart-equals-update-keymaps ()
+(defun ess-smart-equals-update-keymaps ()
   "Force update of `ess-smart-equals-mode' keymaps to adjust for config changes.
 This should not usually need to be done explicitly by the user."
   (interactive)
@@ -985,7 +988,7 @@ to take effect."
        ;; base holds all operators that are assignment or complete with '='
        (base "<-" "<<-" "=" "==" "!=" "<=" ">=" "->" "->>" ":=")
        ;; Used for smart %-completion and cycling
-       (% "%%" "%/%" "%*%" "%in%" "%>%" "%<>%" "%o%" "%x%")
+       (% "%%" "%*%" "%/%" "%in%" "%>%" "%<>%" "%o%" "%x%")
        (all "<-" "<<-" "=" "->" "->>"
             "==" "!=" "<" "<=" ">" ">=" 
             "%<>%" "%>%"
@@ -1091,8 +1094,8 @@ limit to matches to the %-operators."
         'arglist))
      (t))))
 
-(defun essmeq--percent-operators ()
-  "Insertion and completion for %-specific operators."
+(defun ess-smart-equals-percent-operators ()
+  "Ask R for currently valid %-operators and return list of operator strings."
   (let ((proc (if (derived-mode-p 'inferior-ess-mode)
                   (get-buffer-process (current-buffer))
                 (ess-get-next-available-process)))
@@ -1108,7 +1111,6 @@ limit to matches to the %-operators."
         (while (search-forward-regexp "\"\\(%[^%]*%\\)\"" nil t)
           (push (match-string 1) ops))
         (nreverse ops)))))
-
 
 
 ;;; Processing the Action Key
@@ -1316,7 +1318,7 @@ keeping point on the special space character. "
                                       ?\)))))
       (skeleton-pair-insert-maybe nil))))
 
-(defun ess-smart-equals-percent (&optional literal)
+(defun ess-smart-equals-smart-percent (&optional literal)
   "Completion and cycling through %-operators only, unless in comment or string.
 Outside a comment or string, this forces a % context as described
 in `ess-smart-equals-contexts', so the corresponding list can be
@@ -1325,7 +1327,8 @@ key."
   (interactive "P")
   (if literal
       (self-insert-command (if (integerp literal) literal 1))
-    (unless (ess-inside-string-or-comment-p)
+    (unless (let ((closing-char (ess-inside-string-or-comment-p)))
+              (and closing-char (/= closing-char ?%)))
       (ess-smart-equals-set-overriding-context '%)
       (essmeq--process)
       (unless (eq last-command this-command)
@@ -1422,7 +1425,7 @@ function of the same name instead."
   :lighter nil
   :keymap ess-smart-equals-mode-map
   (when ess-smart-equals-mode
-    (emacs-smart-equals-update-keymaps)
+    (ess-smart-equals-update-keymaps)
     (ess-smart-equals-set-contexts major-mode)))
 
 

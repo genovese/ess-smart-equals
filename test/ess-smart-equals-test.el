@@ -201,6 +201,5 @@
                                               (insert "===")))
                                         'one-space
       "<-" 5 5
-      (should (looking-at-p ".0   ===<- 12")))
-    ))
+      (should (looking-at-p ".0   ===<- 12")))))
 
