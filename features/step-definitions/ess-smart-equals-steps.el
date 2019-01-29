@@ -77,3 +77,13 @@ strings to demarcate argument"
     (let ((actual (buffer-string))
           (message "Expected\n%s\nto be part of:\n%s"))
       (cl-assert (s-contains? expected actual) nil message expected actual))))
+
+(When "^I inhibit messages$"
+  "Inhibits minibuffer messages during subsequent steps"
+  (lambda ()
+    (setq inhibit-message t)))
+
+(When "^I allow messages$"
+  "Enable minibuffer messages during subsequent steps"
+  (lambda ()
+    (setq inhibit-message nil)))

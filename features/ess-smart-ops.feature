@@ -36,6 +36,22 @@ Feature: Use smart operators in R source code
     And I press "TAB"
     Then I should see "foo(a = 2, b = 4, c = 8)"
 
+  Scenario: Smart parens do not work in comment
+    When I insert "# abc"
+    And I type "("
+    And I insert "u"
+    And I go to end of line
+    And I insert "v"
+    Then I should see "# abc(uv"
+
+  Scenario: Smart parens do not work in string
+    When I insert "" abc"
+    And I type "("
+    And I insert "u"
+    And I go to end of line
+    And I insert "v"
+    Then I should see "" abc(uv"
+
   Scenario: Smart percent activated
     Then key "%" should be bound in minor mode map
 
@@ -69,15 +85,37 @@ Feature: Use smart operators in R source code
 
   Scenario: Use braces to delimit a block with point at first line
     When I insert "if( a < b )"
+    And I inhibit messages
     And I type "{"
+    And I allow messages
     Then the cursor should be at point "19"
 
   Scenario: Use braces to delimit a block
     When I insert "if( a < b )"
+    And I inhibit messages
     And I type "{"
+    And I allow messages
     Then I should see across lines
     """
     if( a < b ) {
         
     }
     """
+
+  Scenario: Smart braces do not work in comment
+    When I insert "# abc"
+    And I type "{"
+    And I inhibit messages
+    And I go to end of buffer
+    And I allow messages
+    And I insert "u"
+    Then I should see "# abc{u"
+
+  Scenario: Smart braces do not work in string
+    When I insert "" abc"
+    And I type "{"
+    And I inhibit messages
+    And I go to end of buffer
+    And I allow messages
+    And I insert "u"
+    Then I should see "" abc{u"

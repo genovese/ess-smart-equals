@@ -6,8 +6,8 @@
 ;; Maintainer: Christopher R. Genovese <genovese@cmu.edu>
 ;; Keywords: R, S, ESS, convenience
 ;; URL: https://github.com/genovese/ess-smart-equals
-;; Version: 0.2.0
-;; Package-Version: 0.2.0
+;; Version: 0.3.0
+;; Package-Version: 0.3.0
 ;; Package-Requires: ((emacs "25") (ess "16.10"))
 
 
@@ -59,7 +59,7 @@
 ;;   1. With a prefix argument or in specified contexts (which for
 ;;      most major modes means in strings or comments), just
 ;;      insert '='.
-;; 
+;;
 ;;   2. If an operator relevant to the context lies before point
 ;;      (with optional whitespace), it is replaced, cyclically, by the
 ;;      next operator in the configured list for that context.
@@ -83,7 +83,7 @@
 ;;  The function `ess-smart-equals-activate' arranges for the minor mode
 ;;  to be activated by mode hooks for any given list of major modes,
 ;;  defaulting to ESS major modes associated with R (ess-r-mode,
-;;  inferior-ess-r-mode, ess-r-transcript-mode, ess-roxy-mode). 
+;;  inferior-ess-r-mode, ess-r-transcript-mode, ess-roxy-mode).
 ;;
 ;;  Examples
 ;;  --------
@@ -110,17 +110,21 @@
 ;;   determines some other smart operators that may prove useful.
 ;;   Currently, only `brace', `paren', and `percent' are supported,
 ;;   causing `ess-smart-equals-open-brace',
-;;   `ess-smart-equals-open-paren', and `ess-smart-equals-smart-percent'
-;;   to be bound to '{', '(', and '%', respectively. These
-;;   configurably places a properly indented and spaced matching
-;;   pair at point or around the region if active. See also
-;;   `ess-smart-equals-brace-newlines'.
+;;   `ess-smart-equals-open-paren', and `ess-smart-equals-percent'
+;;   to be bound to '{', '(', and '%', respectively. The first two
+;;   of these configurably places a properly indented and spaced
+;;   matching pair at point or around the region if active. The
+;;   paren pair also includes a magic space with a convenient keymap
+;;   for managing parens. See the readme. See the customizable
+;;   variable `ess-smart-equals-brace-newlines' for configuring the
+;;   newlines in braces. The third operator
+;;   (`ess-smart-equals-percent') performs matching of %-operators.
 ;;
 ;;   Finally, the primary user facing functions are named with a
 ;;   prefix `ess-smart-equals-' to avoid conflicts with other
 ;;   packages. Because this is long, the internal functions and
 ;;   objects use a shorter (but still distinctive) prefix `essmeq-'.
-;;   
+;;
 ;;
 ;;  Installation and Initialization
 ;;  -------------------------------
@@ -135,7 +139,7 @@
 ;;        (require 'ess-smart-equals)
 ;;        (ess-smart-equals-activate))
 ;;
-;;  somewhere in your init file, which will add `ess-smart-equals-mode' to 
+;;  somewhere in your init file, which will add `ess-smart-equals-mode' to
 ;;  a prespecified (but customizable) list of mode hooks.
 ;;
 ;;  For those who use the outstanding `use-package', you can do
@@ -153,9 +157,9 @@
 ;;               (inferior-ess-r-mode . ess-smart-equals-mode)
 ;;               (ess-r-transcript-mode . ess-smart-equals-mode)
 ;;               (ess-roxy-mode . ess-smart-equals-mode))
-;;               
-;;  To also activate the smart brace operator and bind it to '{'
-;;  automatically, you can replace this with
+;;
+;;  To also activate the extra smart operators and bind them automatically,
+;;  you can replace this with
 ;;
 ;;      (use-package ess-smart-equals
 ;;        :init   (setq ess-smart-equals-extra-ops '(brace paren percent))
@@ -163,7 +167,18 @@
 ;;        :config (ess-smart-equals-activate))
 ;;
 ;;  Details on customization are provided in the README file.
-;;  
+;;
+;;  Testing
+;;  -------
+;;  To run the tests, install cask and do `cask install' in the
+;;  ess-smart-equals project directory. Then, at the command line,
+;;  do
+;;
+;;      cask exec ert-runner
+;;      cask exec ecukes --reporter magnars
+;;
+;;  Additional test cases are welcome in pull requests.
+;;
 
 ;;; Change Log:
 ;;
@@ -174,9 +189,9 @@
 ;;           properly, a local minor mode, which can be added automatically
 ;;           to relevant mode hooks for ESS R modes. Updated required
 ;;           versions of emacs and ESS.
-;;           
+;;
 ;;  0.1.1 -- Initial release with simple insertion and completion, with
-;;           space padding for the operators except for a single '=' 
+;;           space padding for the operators except for a single '='
 ;;           used to specify named arguments in function calls. Relies on
 ;;           ESS variables `ess-S-assign' and `ess-smart-S-assign-key'
 ;;           to specify preferred operator for standard assignments.
@@ -356,7 +371,7 @@ not checked; specifically, this does not check that BEG..END is
 free of spaces nor that the padding characters around that region
 are correct.
 
-Return (BEG' . END') where BEG' and END' are the beginning and ending 
+Return (BEG' . END') where BEG' and END' are the beginning and ending
 positions of the padded region BEG..END under the padding rules."
   (cons
    (cond ;; left padding (must come second to avoid affecting end)
@@ -380,7 +395,7 @@ positions of the padded region BEG..END under the padding rules."
 
 (defun essmeq--normalize-padding (beg end)
   "Adjust space padding on either side of BEG and END in the current buffer.
-Return (BEG' . END') where BEG' and END' are the beginning and ending 
+Return (BEG' . END') where BEG' and END' are the beginning and ending
 positions of the padded region BEG..END that account for insertions
 and deletions.
 
@@ -537,10 +552,10 @@ positions of the (padded) text."
           (if-let* ((ch (aref op ind))
                     (in-state (aref fsm state))
                     (goto (assoc ch in-state)))
-              (setq state (cadr goto)) ; transition exists, follow it 
+              (setq state (cadr goto)) ; transition exists, follow it
             (push (cl-list* ch next-state nil) (aref fsm state)) ; new state
             (when (> state 0)  ; goto for partial match
-              (push (cons state (- len ind 1)) (map-elt partial ch))) 
+              (push (cons state (- len ind 1)) (map-elt partial ch)))
             (setq state next-state
                   next-state (1+ next-state)))
           (setq ind (1- ind)))
@@ -602,7 +617,7 @@ where STATE represents a state to jump to for partial match from POS
 and SLEN is the length of the omitted suffix for that partial match.
 The search is anchored at POS, or at point if nil. BOUND, if non-nil,
 limits the search to positions not before position BOUND. Assumes
-that surrounding whitespace is handled elsewhere. 
+that surrounding whitespace is handled elsewhere.
 
 Return a dotted list of the form (ACCEPT SLEN START . POS) if a
 match exists, or nil otherwise. ACCEPT is the number of the
@@ -651,6 +666,19 @@ position where scanning started, as passed to this function."
 
 ;;; Key Configuration and Utilities
 
+(defun ess-smart-equals-refresh-mode ()
+  "Re-enable `ess-smart-equals-mode' in all buffers with it enabled.
+This has the effect of refreshing all the mode's keymaps,
+contexts, and options. It is intended for use in customization
+setters for options that affect pre-computed tables or keymaps,
+but it can be used interactively."
+  (interactive)
+  (dolist (buf (buffer-list))
+    (with-current-buffer buf
+      (when (and (boundp 'ess-smart-equals-mode) ess-smart-equals-mode)
+        (let ((inhibit-message t))
+          (ess-smart-equals-mode 1))))))
+
 (defcustom ess-smart-equals-key "="
   "The key for smart assignment operators when `ess-smart-equals-mode' active.
 
@@ -682,7 +710,7 @@ in order for this change to take effect."
                                               (kbd "<DEL>")
                                               (kbd "C-g"))
   "List of keys transiently bound to cancel operator insertion or cycling.
-Except for C-g, a shifted version of each will instead delete backwards a 
+Except for C-g, a shifted version of each will instead delete backwards a
 character, making it easy to delete only part of an operator if desired.
 
 If this is changed after `ess-smart-equals-mode' has been enabled
@@ -727,7 +755,7 @@ clear the last insertion. It defaults to
     (when (memq 'paren ess-smart-equals-extra-ops)
       (define-key map "(" 'ess-smart-equals-open-paren))
     (when (memq 'percent ess-smart-equals-extra-ops)
-      (define-key map "%" 'ess-smart-equals-smart-percent))
+      (define-key map "%" 'ess-smart-equals-percent))
     map))
 
 (defvar ess-smart-equals-mode-map (essmeq--make-mode-map)
@@ -741,15 +769,21 @@ The map continues to be active as long as that key is pressed.")
   "Force update of `ess-smart-equals-mode' keymaps to adjust for config changes.
 This should not usually need to be done explicitly by the user."
   (interactive)
-  (setq essmeq--transient-map (essmeq--make-transient-map)
-        ess-smart-equals-mode-map (essmeq--make-mode-map)))
+  ;; The `ess-smart-equals-mode' entry in `minor-mode-map-alist' is identical
+  ;; to `ess-smart-equals-mode-map', if the map is set. In this case,
+  ;; simply doing `setq' will break the synchrony and the new map will
+  ;; not be reflected in the minor mode bindings. So we use `setcdr' instead.
+  (if (keymapp ess-smart-equals-mode-map)
+      (setcdr ess-smart-equals-mode-map (cdr (essmeq--make-mode-map)))
+    (setq ess-smart-equals-mode-map (essmeq--make-mode-map)))
+  (setq essmeq--transient-map (essmeq--make-transient-map)))
 
 (defun essmeq--keep-transient ()
   "Predicate that returns t when the transient keymap should be maintained."
   (equal (this-command-keys-vector) (vconcat ess-smart-equals-key)))
 
 
-;;; Behavior Configuration 
+;;; Behavior Configuration
 
 (defcustom ess-smart-equals-padding-left 'one-space
   "Specifies padding used on left side of inserted and completed operators.
@@ -859,7 +893,7 @@ checker. See `ess-smart-equals-repl-narrow' and
 
 (defcustom ess-smart-equals-insertion-hook nil
   "A function called when an operator is inserted into the current buffer.
-This (non-standard hook) function should accept six arguments 
+This (non-standard hook) function should accept six arguments
 
        CONTEXT MATCH-TYPE STRING START OLD-END PAD
 
@@ -990,7 +1024,7 @@ to take effect."
        ;; Used for smart %-completion and cycling
        (% "%%" "%*%" "%/%" "%in%" "%>%" "%<>%" "%o%" "%x%")
        (all "<-" "<<-" "=" "->" "->>"
-            "==" "!=" "<" "<=" ">" ">=" 
+            "==" "!=" "<" "<=" ">" ">="
             "%<>%" "%>%"
             "+" "*" "/" "%*%" "%%")
        (t "<-" "<<-" "=" "==" "->" "->>" "%<>%"))
@@ -1047,7 +1081,7 @@ Do not set this directly")
             (essmeq--build-matchers (map-elt contexts t))))))
 
 
-;;; Contexts 
+;;; Contexts
 
 (defun essmeq--inside-call-p ()
   "Return non-nil if point is in a function call (or indexing construct).
@@ -1146,7 +1180,7 @@ should be ignored."
                        (or (essmeq--match fsm pos limit)
                            (and (not no-partial)
                                 (or (essmeq--complete fsm partial pos limit)
-                                    (essmeq--fallback pos)))))) 
+                                    (essmeq--fallback pos))))))
             (if accepted
                 (let* ((op (if (zerop slen)
                                (mod (1+ accepted) num-ops)
@@ -1225,10 +1259,31 @@ operator string as is."
 
 ;;; Extra Smart Operators
 
+;;;###autoload
+(defun ess-smart-equals-percent (&optional literal)
+  "Completion and cycling through %-operators only, unless in comment or string.
+Outside a comment or string, this forces a % context as described
+in `ess-smart-equals-contexts', so the corresponding list can be
+customized to determine ordering. This should be bound to the `%'
+key."
+  (interactive "P")
+  (if literal
+      (self-insert-command (if (integerp literal) literal 1))
+    (unless (let ((closing-char (ess-inside-string-or-comment-p)))
+              (and closing-char (/= closing-char ?%)))
+      (ess-smart-equals-set-overriding-context '%)
+      (essmeq--process)
+      (unless (eq last-command this-command)
+        (setq essmeq--stop-transient
+              (set-transient-map essmeq--transient-map
+                                 #'essmeq--keep-transient
+                                 ess-smart-equals-transient-exit-function))))))
+
+;;;###autoload
 (defun ess-smart-equals-open-brace (&optional literal)
   "Inserts properly indented and spaced brace pair."
   (interactive "P")
-  (if literal
+  (if (or literal (ess-inside-string-or-comment-p))
       (self-insert-command (if (integerp literal) literal 1))
     (when (not (eq (char-syntax (char-before)) ?\ ))
       (insert " "))
@@ -1286,8 +1341,6 @@ applies to any region from point forward."
       (yank)
       (forward-char -2))))
 
-
-;;ATTN: magic space killed with = operator. Can it be saved?
 (defvar essmeq--paren-map (let ((m (make-sparse-keymap)))
                             (define-key m (kbd ",") 'essmeq--paren-comma)
                             (define-key m (kbd ")") 'essmeq--paren-escape)
@@ -1298,6 +1351,7 @@ applies to any region from point forward."
   "Keymap active in fresh space in the middle of a new smart open paren.")
 (fset 'essmeq--paren-map essmeq--paren-map)
 
+;;;###autoload
 (defun ess-smart-equals-open-paren (&optional literal)
   "Inserts properly a properly spaced paren pair with an active keymap inside.
 Point is left in the middle of the paren pair and associated with
@@ -1305,7 +1359,7 @@ a special keymap, where tab deletes the extra space and moves
 point out of the parentheses and comma inserts a spaced comma,
 keeping point on the special space character. "
   (interactive "P")
-  (if (or literal (ess-inside-string-p)) ;; pairing in comments seems ok for now
+  (if (or literal (ess-inside-string-or-comment-p))
       (self-insert-command (if (integerp literal) literal 1))
     ;; Check syntax table for inferior-ess-r-mode for ', apparently not string
     (let ((skeleton-pair t)
@@ -1317,25 +1371,6 @@ keeping point on the special space character. "
                                             keymap essmeq--paren-map)))
                                       ?\)))))
       (skeleton-pair-insert-maybe nil))))
-
-(defun ess-smart-equals-smart-percent (&optional literal)
-  "Completion and cycling through %-operators only, unless in comment or string.
-Outside a comment or string, this forces a % context as described
-in `ess-smart-equals-contexts', so the corresponding list can be
-customized to determine ordering. This should be bound to the `%'
-key."
-  (interactive "P")
-  (if literal
-      (self-insert-command (if (integerp literal) literal 1))
-    (unless (let ((closing-char (ess-inside-string-or-comment-p)))
-              (and closing-char (/= closing-char ?%)))
-      (ess-smart-equals-set-overriding-context '%)
-      (essmeq--process)
-      (unless (eq last-command this-command)
-        (setq essmeq--stop-transient
-              (set-transient-map essmeq--transient-map
-                                 #'essmeq--keep-transient
-                                 ess-smart-equals-transient-exit-function))))))
 
 
 ;;; Entry Points
@@ -1393,7 +1428,7 @@ restore the standard meaning of keys."
       (setq essmeq--stop-transient
             (set-transient-map essmeq--transient-map
                                #'essmeq--keep-transient
-                               ess-smart-equals-transient-exit-function))))) 
+                               ess-smart-equals-transient-exit-function)))))
 
 
 ;;; Minor Mode

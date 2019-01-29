@@ -1,8 +1,8 @@
 
 # ess-smart-equals.el
 
-> Current Version: 0.2.0. This is a major update &#x2013; indeed a
-> complete rewrite &#x2013; relative to version 0.1.0, with significant
+> Current Version: 0.3.0. This is a major update &#x2013; indeed a
+> complete rewrite &#x2013; relative to version 0.2.2, with significant
 > improvements in functionality, flexibility, and performance.
 > This has also been brought up to date with recent versions of
 > ESS.
@@ -56,10 +56,10 @@ the last operator and tab offers a choice of operators by completion.
 usual maning of backspace.) See `ess-smart-equals-cancel-keys`.
 
 By default, the minor mode activates the '=' key, but this can
-be customized by setting the option \`ess-smart-equals-key' before
+be customized by setting the option `ess-smart-equals-key` before
 this package is loaded.
 
-The function \`ess-smart-equals-activate' arranges for the minor mode
+The function `ess-smart-equals-activate` arranges for the minor mode
 to be activated by mode hooks for any given list of major modes,
 defaulting to ESS major modes associated with R (`ess-r-mode`,
 `inferior-ess-r-mode`, `ess-r-transcript-mode`, `ess-roxy-mode`). 
@@ -86,12 +86,18 @@ position of point.
 
 As a bonus, the value of the variable `ess-smart-equals-extra-ops`
 when this package is loaded, determines some other smart operators
-that may prove useful. Currently, only `brace` and `paren` are
-supported, causing `ess-smart-equals-open-brace` and
-`ess-smart-equals-open-paren` to be bound to '{' and '(',
-respectively. These configurably places a properly indented and
-spaced matching pair at point or around the region if active. See
-also `ess-smart-equals-brace-newlines`.
+that may prove useful. Currently, only `brace`, `paren`, and `percent`
+are supported, causing `ess-smart-equals-open-brace`,
+`ess-smart-equals-open-paren`, and `ess-smart-equals-percent` to be
+bound to '{', '(', and '%', respectively. The first two of these
+configurably places a properly indented and spaced matching pair at
+point or around the region if active. The paren pair also includes
+a magic space with a convenient keymap for managing parens. See the
+readme. See the customizable variable
+`ess-smart-equals-brace-newlines` for configuring the newlines around
+braces. The third operator (`ess-smart-equals-percent`) performs
+matching of %-operators analogously to `ess-smart-equals`. See the
+**Extra Operators** section below under **Customization** for details.
 
 Finally, the primary user facing functions are named with a
 prefix `ess-smart-equals-` to avoid conflicts with other
@@ -136,12 +142,11 @@ of this is
              (ess-r-transcript-mode . ess-smart-equals-mode)
              (ess-roxy-mode . ess-smart-equals-mode))
 
-To also activate the smart open brace and paren operators and
-automatically bind them to '{' and '(', respectively, you can
-replace this with
+To also activate the extra smart operators and automatically bind
+them, you can replace this with
 
     (use-package ess-smart-equals
-      :init   (setq ess-smart-equals-extra-ops '(brace paren))
+      :init   (setq ess-smart-equals-extra-ops '(brace paren percent))
       :after  (:any ess-r-mode inferior-ess-r-mode ess-r-transcript-mode)
       :config (ess-smart-equals-activate))
 
@@ -173,7 +178,7 @@ bound. First, the basic key of `ess-smart-equals-key` (e.g., '='
 for '=' or 'C-c ='.) reexecutes `ess-smart-equals`, cycling the
 operators according to context. Any other key exits the transient
 keymap. Second, any key in `ess-smart-equals-cancel-keys` deletes any
-inserted operator before point; a shifted version of these such a
+inserted operator before point; a shifted version of such a
 key (except `C-g`) deletes a single character backwards and thus
 cancels the transient bindings. Finally, tab allows you to select an
 operator by completion.
@@ -181,6 +186,9 @@ operator by completion.
 An advanced customization is to change the condition for exiting the
 transient map in this situation. See
 `ess-smart-equals-transient-exit-function`.
+
+Several other useful smart operators can be configured;
+see **Extra Operators** below.
 
 
 ### Contexts
@@ -205,56 +213,100 @@ change to the context, see `ess-smart-equals-overriding-context`.
 
 ### Hooks
 
+The hook `ess-smart-equals-mode-hook` is called whenever the minor
+mode is enabled or disabled. The hooks `ess-smart-equals-mode-on-hook`
+and `ess-smart-equals-mode-off-hook` are called when the mode is
+enabled or disabled, respectively.
+
+The variable `ess-smart-equals-narrow-function` is used to narrow
+the buffer to a specific region where the ESS syntax checking will
+be valid. This is used primarily in `inferior-ess-r-mode` to restrict
+attention to the current prompt line or the zone between prompts
+because output or erroneous commands can adversely effect the
+ESS syntax checking. This should not normally be needed otherwise,
+but it can be set in `ess-smart-equals-options` if desired.
+
 The customizable variable `ess-smart-equals-insertion-hook`, if set,
 allows arbitrary post-processing after an operator insertion. It is
 passed all the information needed to characterize the insertion; see
-the documentation for that variable for details.
+the documentation for that variable for details. 
 
 
 ### Extra Operators
 
 If `ess-smart-equals-extra-ops` is non-nil, it should be a list
-containing one or both of the symbols `brace` or `paren`.
-These settings will cause '{' and '(', respectively, to
-be bound in the minor mode map to a smart operator that
-inserts a properly spaced and indented pair, wrapping around
-the region if it is active.
+containing some of the symbols `brace`, `paren`, or `percent`.
+These settings will cause '{', '(', and '%', respectively, to
+be bound in the minor mode map to a smart operator with
+the following features:
 
--   The newlines before and after the braces can be configured via
-    `ess-smart-equals-brace-newlines`. This can be configured
+-   `brace`
+    
+    Binds '{' to the command `ess-smart-equals-open-brace`. This
+    inserts a properly spaced and indented pair of braces, wrapping
+    around the region if it is active. The customizable variable
+    `ess-smart-equals-brace-newlines` controls the placement of
+    newlines before and after each brace. This can be configured
     separately or added to your ESS style as desired.
 
--   The special open paren command (`ess-smart-equals-open-paren`)
-    puts point on a space between the paired parentheses. This space
-    has an attached keymap where tab will delete the space and move
-    out of the parentheses and comma will insert a nicely spaced comma
-    while keeping point on the special space. This makes it fast to
-    enter the arguments of a function or a condition in a conditional.
+-   `paren`
+    
+    Binds '(' to the command `ess-smart-equals-open-paren`. This
+    inserts a matching pair of parentheses with point on a magic
+    space between them. If region is active, it is wrapped by the
+    parentheses. The magic space has an attached keymap
+    that makes it easy to fill, escape, and expand the parenthesis
+    pair. In particular, when on this space:
+    
+    -   ')' or TAB eliminates the magic space and exits the parentheses;
+    
+    -   ',' inserts a spaced comma, leaving point on the magic space;
+    
+    -   ';' expands the region after the parenthesis pair to encompass
+        an additional balanced expression; and
+    
+    -   'C-;' moves the marked region after the pair (e.g., as constructed
+        by ';') inside the parentheses, eliminating leading spaces unless
+        a prefix argument is given.
+    
+    Taken together, these make it fast to fill in function calls
+    or conditionals.
+
+-   `percent`
+    
+    Binds '%' to the command `ess-smart-equals-percent`. This
+    provides expansion, cycling, and completion analogous to
+    `ess-smart-equals` but for %-operators in R.
+
+With a prefix argument, all of these insert the literal corresponding
+character, with repeats if the argument is numeric.
 
 Additional smart operators may be added in future versions.    
 
 
 ## Change Log
 
--   **0.2.0:** Breaking changes in functionality, design, and configuration.
-    No longer relies on \`ess-S-assign' which was deprecated in
+-   **0.3.0:** Breaking changes in functionality, design, and configuration.
+    No longer relies on `ess-S-assign` which was deprecated in
     ESS. Now provides more powerful context-sensitive, prioritized
     operator lists with cycling and completion. The mode is now,
     properly, a local minor mode, which can be added automatically
     to relevant mode hooks for ESS R modes. Updated required
     versions of emacs and ESS.
 
--   **0.1.1:** Initial release with simple insertion and completion, with
+-   **0.2.2:** ATTN:Fix for deprecated ESS variables `ess-S-assign` and
+    `ess-smart-S-assign-key`.
+
+-   **0.2.1:** Initial release with simple insertion and completion, with
     space padding for the operators except for a single '=' 
     used to specify named arguments in function calls. Relies on
-    ESS variables \`ess-S-assign' and \`ess-smart-S-assign-key'
+    ESS variables `ess-S-assign` and `ess-smart-S-assign-key`
     to specify preferred operator for standard assignments.
 
 
 ## To Do
 
--   Configurable padding
+-   Handle narrowing in inferior mode
+-   More flexible contexts
 -   Sticky context during cycling
--   Handle % completion with a special context
--   
 
