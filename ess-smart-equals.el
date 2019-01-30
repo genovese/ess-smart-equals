@@ -667,11 +667,12 @@ position where scanning started, as passed to this function."
 ;;; Key Configuration and Utilities
 
 (defun ess-smart-equals-refresh-mode ()
-  "Re-enable `ess-smart-equals-mode' in all buffers with it enabled.
+  "Re-enable `ess-smart-equals-mode' in all buffers where it is enabled.
 This has the effect of refreshing all the mode's keymaps,
 contexts, and options. It is intended for use in customization
 setters for options that affect pre-computed tables or keymaps,
-but it can be used interactively."
+but it can be used interactively as well, for instance, after
+manually updating the values of such options."
   (interactive)
   (dolist (buf (buffer-list))
     (with-current-buffer buf
@@ -682,29 +683,45 @@ but it can be used interactively."
 (defcustom ess-smart-equals-key "="
   "The key for smart assignment operators when `ess-smart-equals-mode' active.
 
-If this is changed after `ess-smart-equals-mode' has been enabled
-in a buffer, then either the mode should be disabled and
-re-enabled in one such buffer or you should do
+For changes in this variable to take effect, some precomputed
+information must be refreshed in `ess-smart-equals-mode' buffers.
+Changing the variable through the customization mechanism does
+such a refresh automatically. If instead you manually change the
+value of this option (e.g., with `setq'), you can either disabled
+and re-enabled the minor mode in one such buffer or do
 
-   M-x ess-smart-equals-update-keymaps
+   M-x ess-smart-equals-refresh-mode
 
-in order for this change to take effect."
+interactively, or (ess-smart-equals-refresh-mode) in lisp, to
+make this change take effect."
   :group 'ess-edit
-  :type 'string)
+  :type 'string
+  :initialize 'custom-initialize-default
+  :set (lambda (sym val)
+         (set-default sym val)
+         (ess-smart-equals-refresh-mode)))
 
 (defcustom ess-smart-equals-extra-ops nil
   "If non-nil, a symbol list of extra smart operators to bind in the mode map.
 Currently, only `brace' and `paren' are supported.
 
-If this is changed after `ess-smart-equals-mode' has been enabled
-in a buffer, then either the mode should be disabled and
-re-enabled in one such buffer or you should do
+For changes in this variable to take effect, some precomputed
+information must be refreshed in `ess-smart-equals-mode' buffers.
+Changing the variable through the customization mechanism does
+such a refresh automatically. If instead you manually change the
+value of this option (e.g., with `setq'), you can either disabled
+and re-enabled the minor mode in one such buffer or do
 
-   M-x ess-smart-equals-update-keymaps
+   M-x ess-smart-equals-refresh-mode
 
-in order for this change to take effect."
+interactively, or (ess-smart-equals-refresh-mode) in lisp, to
+make this change take effect."
   :group 'ess-edit
-  :type '(choice (const nil) (repeat (const brace) (const paren))))
+  :type '(choice (const nil) (repeat (const brace) (const paren)))
+  :initialize 'custom-initialize-default
+  :set (lambda (sym val)
+         (set-default sym val)
+         (ess-smart-equals-refresh-mode)))
 
 (defcustom ess-smart-equals-cancel-keys (list [backspace]
                                               (kbd "<DEL>")
@@ -713,16 +730,24 @@ in order for this change to take effect."
 Except for C-g, a shifted version of each will instead delete backwards a
 character, making it easy to delete only part of an operator if desired.
 
-If this is changed after `ess-smart-equals-mode' has been enabled
-in a buffer, then either the mode should be disabled and
-re-enabled in one such buffer or you should do
+For changes in this variable to take effect, some precomputed
+information must be refreshed in `ess-smart-equals-mode' buffers.
+Changing the variable through the customization mechanism does
+such a refresh automatically. If instead you manually change the
+value of this option (e.g., with `setq'), you can either disabled
+and re-enabled the minor mode in one such buffer or do
 
-   M-x ess-smart-equals-update-keymaps
+   M-x ess-smart-equals-refresh-mode
 
-in order for this change to take effect."
+interactively, or (ess-smart-equals-refresh-mode) in lisp, to
+make this change take effect."
   :group 'ess-edit
   :type '(repeat
-          (choice string (restricted-sexp :match-alternatives (vectorp)))))
+          (choice string (restricted-sexp :match-alternatives (vectorp))))
+  :initialize 'custom-initialize-default
+  :set (lambda (sym val)
+         (set-default sym val)
+         (ess-smart-equals-refresh-mode)))
 
 (defun essmeq--make-transient-map (&optional cancel-keys)
   "Resets transient keymap used after `ess-smart-equals'.
@@ -1080,6 +1105,14 @@ Do not set this directly")
       (setq essmeq--matcher-alist
             (essmeq--build-matchers (map-elt contexts t))))))
 
+(defun ess-smart-equals-repl-narrow ()
+  "ATTN"
+  (let* ((proc (get-buffer-process (current-buffer)))
+         (pmark (process-mark proc)))
+    (if (> (point) pmark)
+        (narrow-to-region pmark (point-max))
+      :ATTN)))
+
 
 ;;; Contexts
 
@@ -1145,6 +1178,23 @@ limit to matches to the %-operators."
         (while (search-forward-regexp "\"\\(%[^%]*%\\)\"" nil t)
           (push (match-string 1) ops))
         (nreverse ops)))))
+
+(defun ess-smart-equals-prompts ()
+  "Ask R for current primary and secondary prompts.
+Return pair of prompt strings (PRIMARY . SECONDARY)."
+  (let ((proc (if (derived-mode-p 'inferior-ess-mode)
+                  (get-buffer-process (current-buffer))
+                (ess-get-next-available-process "R" t)))
+        (cmd "c(options()$prompt, options()$continue)\n"))
+    (if (not proc)
+        (cons (regexp-quote (or inferior-ess-primary-prompt "> "))
+              (regexp-quote (or inferior-ess-secondary-prompt "+ ")))
+      (with-temp-buffer
+        (ess-command cmd (current-buffer) nil nil nil proc)
+        (goto-char (point-min))
+        (search-forward-regexp " \"\\([^\"]+\\)\" \"\\([^\"]+\\)\" *$" nil t)
+        (cons (regexp-quote (match-string 1))
+              (regexp-quote (match-string 2)))))))
 
 
 ;;; Processing the Action Key
