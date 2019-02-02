@@ -262,21 +262,24 @@ the following features:
     
     -   ',' inserts a spaced comma, leaving point on the magic space;
     
-    -   ':' (i.e., 'S-;') expands the region after the parenthesis
-        pair to encompass an additional balanced expression; and
+    -   'C-;' expands the region after the parenthesis pair to
+        encompass an additional balanced expression; and
     
-    -   'C-;' moves the marked region after the pair (e.g., as constructed
-        by ';') inside the parentheses, eliminating leading spaces unless
-        a prefix argument is given.
+    -   'M-;' moves the marked region after the pair (e.g., as
+        constructed by 'C-;') inside the parentheses, eliminating
+        leading spaces unless a prefix argument is given.
     
     Taken together, these make it fast to fill in function calls
     or conditionals.
 
 -   `percent`
     
-    Binds '%' to the command `ess-smart-equals-percent`. This
-    provides expansion, cycling, and completion analogous to
-    `ess-smart-equals` but for %-operators in R.
+    Binds '%' to the command `ess-smart-equals-percent`. This provides
+    expansion, cycling, and completion analogous to `ess-smart-equals`
+    but for %-operators in R. The `ess-smart-equals` and
+    `ess-smart-equals-percent` commands can be interleaved at will;
+    when one follows the other, it will remove operators produced by
+    the preceding command and start cycling anew.
 
 With a prefix argument, all of these insert the literal corresponding
 character, with repeats if the argument is numeric.
@@ -294,8 +297,8 @@ Additional smart operators may be added in future versions.
     to relevant mode hooks for ESS R modes. Updated required
     versions of emacs and ESS.
 
--   **0.2.2:** ATTN:Fix for deprecated ESS variables `ess-S-assign` and
-    `ess-smart-S-assign-key`.
+-   **0.2.2:** Fix for deprecated ESS variables `ess-S-assign` and
+    `ess-smart-S-assign-key`. Thanks to Daniel Gomez (@dangom).
 
 -   **0.2.1:** Initial release with simple insertion and completion, with
     space padding for the operators except for a single '=' 
@@ -306,7 +309,20 @@ Additional smart operators may be added in future versions.
 
 ## To Do
 
--   Handle narrowing in inferior mode
--   More flexible contexts
--   Sticky context during cycling
+-   Allow finer control in context operator lists, both in
+    distinguishing cycling from completion and in allowing
+    dynamic operator lists. An example use case would be
+    asking R for the set of current `%infix%` operators.
+    Some of the infrastructure for this is already in place.
+
+-   Add `ess-smart-equals-the-works` for simple, full feature setup.
+
+-   Add more tests
+
+-   &#x2026;
+
+
+## Contributors
+
+-   Daniel Gomez (@dangom)
 

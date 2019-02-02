@@ -758,6 +758,17 @@ make this change take effect."
          (set-default sym val)
          (ess-smart-equals-refresh-mode)))
 
+(defun essmeq--transient-equals (&optional literal)
+  "A version of `ess-smart-equals' for use in the transient key map.
+This detects previous use of `ess-smart-equals-percent' and clears that
+operator if the user switches to equals."
+  (interactive "P")
+  (ignore literal)
+  (when (eq last-command 'ess-smart-equals-percent)
+    (let ((ess-smart-equals-overriding-context '%))
+      (essmeq--remove 'only-match)))
+  (call-interactively #'ess-smart-equals))
+
 (defun essmeq--make-transient-map (&optional cancel-keys)
   "Resets transient keymap used after `ess-smart-equals'.
 CANCEL-KEYS, if non-nil, is a list of keys in that map that will
@@ -765,8 +776,12 @@ clear the last insertion. It defaults to
 `ess-smart-equals-cancel-keys', which see. See also
 `essmeq--transient-map'."
   (let ((cancel-keys (or cancel-keys ess-smart-equals-cancel-keys))
+        (percentp (memq 'percent ess-smart-equals-extra-ops))
         (map (make-sparse-keymap)))
-    (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
+    (if (not percentp)
+        (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
+      (define-key map "%" #'ess-smart-equals-percent)
+      (define-key map (kbd ess-smart-equals-key) #'essmeq--transient-equals))
     (define-key map "\t" #'essmeq--selected)
     (dolist (key cancel-keys)
       (define-key map key #'essmeq--remove)
@@ -814,7 +829,10 @@ This should not usually need to be done explicitly by the user."
 
 (defun essmeq--keep-transient ()
   "Predicate that returns t when the transient keymap should be maintained."
-  (equal (this-command-keys-vector) (vconcat ess-smart-equals-key)))
+  (let ((command-keys (this-command-keys-vector)))
+    (or (equal command-keys (vconcat ess-smart-equals-key))
+        (and (memq 'percent ess-smart-equals-extra-ops)
+             (equal command-keys (vector ?%))))))
 
 
 ;;; Behavior Configuration
@@ -1054,11 +1072,17 @@ to take effect."
        ;; base holds all operators that are assignment or complete with '='
        (base "<-" "<<-" "=" "==" "!=" "<=" ">=" "->" "->>" ":=")
        ;; Used for smart %-completion and cycling
-       (% "%%" "%*%" "%/%" "%in%" "%>%" "%<>%" "%o%" "%x%")
+       (% "%*%" "%%" "%/%" "%in%" "%>%" "%<>%" "%o%" "%x%")
+       ;; Used for removal in ess-smart-equals-percent
+       (not-% "<-" "<<-" "=" "->" "->>"
+              "==" "!=" "<" "<=" ">" ">="
+              "+" "-" "*" "**" "/" "^" "&" "&&" "|" "||")
+       ;; All the principal binary operators
        (all "<-" "<<-" "=" "->" "->>"
             "==" "!=" "<" "<=" ">" ">="
-            "%<>%" "%>%"
-            "+" "*" "/" "%*%" "%%")
+            "%*%" "%%" "%/%" "%in%" "%x%" "%o%"
+            "%<>%" "%>%" ; not builtin but common (dynamic?)
+            "+" "-" "*" "**" "/" "^" "&" "&&" "|" "||")
        (t "<-" "<<-" "=" "==" "->" "->>" "%<>%"))
     (ess-roxy-mode
      (comment "<-" "=" "==" "<<-" "->" "->>" "%<>%")))
@@ -1253,18 +1277,21 @@ limit to matches to the %-operators."
 
 ;;; Processing the Action Key
 
-(defun essmeq--search (&optional initial-pos no-partial)
+(defun essmeq--search (&optional initial-pos no-partial no-fallback)
   "Search backwards for an operator matching the current context.
 Search is anchored at INITIAL-POS, or point if nil. If NO-PARTIAL
 is nil, then partial matches of a prefix of relevant operators
-strings are allowed. Returns a list (CONTEXT MTYPE STRING START
-END IGNORE-PADDING), where CONTEXT is a context symbol in
-`ess-smart-equals-contexts'; MTYPE is one of the keyword :exact,
-a positive integer indicating a partial match, :literal (for
-literal '=' insertion), and :no-match; STRING is the operator
-string to be inserted, replacing the region between START and
-END. Finally, IGNORE-PADDING is non-nil when padding options
-should be ignored."
+strings are allowed. If NO-FALLBACK is nil, then failure to match
+or complete will fall back to insertion from the `base' context.
+
+Return a list (CONTEXT MTYPE STRING START END IGNORE-PADDING),
+where CONTEXT is a context symbol in `ess-smart-equals-contexts';
+MTYPE is one of the keyword :exact, a positive integer indicating
+a partial match, :literal (for literal '=' insertion), and
+:no-match; STRING is the operator string to be inserted,
+replacing the region between START and END. Finally,
+IGNORE-PADDING is non-nil when padding options should be
+ignored."
   ;; Putting an integer rather than :partial in the return list is a
   ;; practical choice, if somewhat obscure, to make it easier to use
   ;; downstream, e.g., in essmeq--replace-region. The alternative is
@@ -1284,7 +1311,8 @@ should be ignored."
                        (or (essmeq--match fsm pos limit)
                            (and (not no-partial)
                                 (or (essmeq--complete fsm partial pos limit)
-                                    (essmeq--fallback pos))))))
+                                    (and (not no-fallback)
+                                         (essmeq--fallback pos)))))))
             (if accepted
                 (let* ((op (if (zerop slen)
                                (mod (1+ accepted) num-ops)
@@ -1295,15 +1323,18 @@ should be ignored."
               (list context :no-match (aref targets 0) pos pos)))
         (list context :literal "=" pt pt t)))))
 
-(defun essmeq--process (&optional no-partial)
+(defun essmeq--process (&optional no-partial no-fallback)
   "Insert, cycle, or complete an operator at point based on context.
 Point ends up at the end of the inserted string. Calls
-`ess-smart-equals-insertion-hook' on the result of the
-search (see `essmeq--search') if the hook is non-nil."
+`ess-smart-equals-insertion-hook', if the hook is non-nil, with
+results of the search (from `essmeq--search') modified to account
+for the beginning and ending of the inserted operator string.
+Arguments NO-PARTIAL and NO-FALLBACK are passed to
+`essmeq--search', which see."
   (save-restriction
     (when ess-smart-equals-narrow-function
       (funcall ess-smart-equals-narrow-function))
-    (let* ((match (essmeq--search (point) no-partial))
+    (let* ((match (essmeq--search (point) no-partial no-fallback))
            (spec (cddr match))
            (after (apply #'essmeq--replace-region spec)))
       (goto-char (cdr after)) ; end position after padding
@@ -1312,26 +1343,23 @@ search (see `essmeq--search') if the hook is non-nil."
               (nth 4 spec) (cdr after))
         (apply ess-smart-equals-insertion-hook spec)))))
 
-(defun essmeq--remove ()
+(defun essmeq--remove (&optional only-match)
   "Remove a matching operator at point based on context, else one character."
   (interactive)
-  (let* ((match (cdr (essmeq--search nil t)))
-         (mtype (car match))
-         (beg (caddr match))
-         (end (cadddr match)))
-    (cond
-     ((eq mtype :exact)
-      (let ((padded (essmeq--find-padded-region beg end)))
-        (thread-first (essmeq--replace-region "" (car padded) (cdr padded) t)
-          cdr
-          goto-char)))
-     ((integerp mtype)
-      (let ((padded (essmeq--find-padded-region beg end)))
-        (thread-first (essmeq--replace-region "" (- end mtype) (cdr padded) t)
-          cdr
-          goto-char)))
-     (t
-      (delete-char -1)))))
+  (save-restriction
+    (when ess-smart-equals-narrow-function
+      (funcall ess-smart-equals-narrow-function))
+    (let* ((match (cdr (essmeq--search nil t))) ; ATTN: allow completion?
+           (mtype (car match))
+           (beg (caddr match))
+           (end (cadddr match))
+           (exact (eq mtype :exact)))
+      (if (or exact (integerp mtype))
+          (let* ((padded (essmeq--find-padded-region beg end))
+                 (start (if exact (car padded) (- end mtype)))
+                 (region (essmeq--replace-region "" start (cdr padded) t)))
+            (goto-char (cdr region)))
+        (unless only-match (delete-char -1))))))
 
 (defun essmeq--selected (op-string)
   "Insert operator string at point with padding, replacing existing operator.
@@ -1344,16 +1372,18 @@ operator string as is."
                                         (mapcar #'cdr)
                                         (apply #'append)
                                         delete-dups))))
-  (let* ((match (cdr (essmeq--search nil t)))
-         (mtype (car match))
-         (beg (caddr match))
-         (end (cadddr match)))
-    (if (or (eq mtype :exact) (eq mtype :no-match) (integerp mtype))
-        (let ((pad (essmeq--find-padded-region beg end)))
-          (thread-first (essmeq--replace-region op-string (car pad) (cdr pad))
-            cdr
-            goto-char))
-      (insert op-string))))
+  (save-restriction
+    (when ess-smart-equals-narrow-function
+      (funcall ess-smart-equals-narrow-function))
+    (let* ((match (cdr (essmeq--search nil t)))
+           (mtype (car match))
+           (beg (caddr match))
+           (end (cadddr match)))
+      (if (or (eq mtype :exact) (eq mtype :no-match) (integerp mtype))
+          (let* ((pad (essmeq--find-padded-region beg end))
+                 (reg (essmeq--replace-region op-string (car pad) (cdr pad))))
+            (goto-char (cdr reg)))
+        (insert op-string)))))
 
 
 ;;; Extra Smart Operators
@@ -1370,13 +1400,16 @@ key."
       (self-insert-command (if (integerp literal) literal 1))
     (unless (let ((closing-char (ess-inside-string-or-comment-p)))
               (and closing-char (/= closing-char ?%)))
-      (ess-smart-equals-set-overriding-context '%)
-      (essmeq--process)
       (unless (eq last-command this-command)
+        (let ((ess-smart-equals-overriding-context 'not-%))
+          (essmeq--remove 'only-match))
         (setq essmeq--stop-transient
               (set-transient-map essmeq--transient-map
                                  #'essmeq--keep-transient
-                                 ess-smart-equals-transient-exit-function))))))
+                                 ess-smart-equals-transient-exit-function)))
+      (ess-smart-equals-set-overriding-context '%)
+      (essmeq--process nil t)
+      (ess-smart-equals-clear-overriding-context))))
 
 ;;;###autoload
 (defun ess-smart-equals-open-brace (&optional literal)

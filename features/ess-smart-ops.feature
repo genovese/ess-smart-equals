@@ -6,6 +6,10 @@ Feature: Use smart operators in R source code
   Background: 
     Given I turn on ess-smart-equals
 
+  #
+  # Parenthesis
+  #
+
   Scenario: Smart parentheses activated
     Then key "(" should be bound in minor mode map
 
@@ -52,18 +56,22 @@ Feature: Use smart operators in R source code
     And I insert "v"
     Then I should see "" abc(uv"
 
+  #
+  # Percent
+  #
+
   Scenario: Smart percent activated
     Then key "%" should be bound in minor mode map
 
   Scenario: Insert percent operator
     When I insert "a"
     And I type "%b"
-    Then I should see "a %% b"
+    Then I should see "a %*% b"
 
   Scenario: Insert percent operator, cycle once
     When I insert "a"
     And I type "%%b"
-    Then I should see "a %*% b"
+    Then I should see "a %% b"
 
   Scenario: Insert percent operator, cycle twice
     When I insert "a"
@@ -79,6 +87,36 @@ Feature: Use smart operators in R source code
     When I insert "a %i"
     And I type "%b"
     Then I should see "a %in% b"
+
+  Scenario: Cycling with equals and percent interleaved 112211
+    When I insert "a"
+    And I type "==%%==b"
+    Then I should see "a <<- b"
+
+  Scenario: Cycling with equals and percent interleaved 11222
+    When I insert "a"
+    And I type "==%%%b"
+    Then I should see "a %/% b"
+
+  Scenario: Cycling with equals and percent interleaved 222111
+    When I insert "a"
+    And I type "%%%===b"
+    Then I should see "a = b"
+
+  Scenario: Cycling with equals and percent interleaved 112211, conditional
+    When I insert "if"
+    And I type "(a==%%%%==b;"
+    Then I should see "if(a != b)"
+
+  Scenario: Cycling with equals and percent interleaved 22221111, conditional
+    When I insert "if"
+    And I type "(a%%%%====b;"
+    Then I should see "if(a <= b)"
+
+
+  #
+  # Braces
+  #
 
   Scenario: Smart braces activated
     Then key "{" should be bound in minor mode map
