@@ -258,12 +258,12 @@ the following features:
     that makes it easy to fill, escape, and expand the parenthesis
     pair. In particular, when on this space:
     
-    -   ')' or TAB eliminates the magic space and exits the parentheses;
+    -   ')' or ';' eliminates the magic space and exits the parentheses;
     
     -   ',' inserts a spaced comma, leaving point on the magic space;
     
-    -   ';' expands the region after the parenthesis pair to encompass
-        an additional balanced expression; and
+    -   ':' (i.e., 'S-;') expands the region after the parenthesis
+        pair to encompass an additional balanced expression; and
     
     -   'C-;' moves the marked region after the pair (e.g., as constructed
         by ';') inside the parentheses, eliminating leading spaces unless

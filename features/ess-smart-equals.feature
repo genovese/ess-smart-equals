@@ -126,3 +126,23 @@ Feature: Use equals in R source code
     And I type "==="
     And I press "<backspace>"
     Then I should see "foo"
+
+  Scenario: Use fallback completion in a conditional context
+    When I insert "if"
+    And I type "( a :=u"
+    Then I should see "if( a := u )"
+
+  Scenario: Use removal key after insertion to erase operator
+    When I insert "f"
+    And I type "="
+    And I press "<backspace>"
+    And I type "oo"
+    Then I should see "foo"
+
+  Scenario: Use removal key after insertion to erase operator, in arg list
+    When I insert "f(a"
+    And I type "="
+    And I press "<backspace>"
+    And I type "bc"
+    And I press ")"
+    Then I should see "f(abc)"

@@ -31,9 +31,9 @@ Feature: Use smart operators in R source code
     And I insert " 8"
     And I pop the mark
     And I type "(a=2,b=4,c="
-    And I type ";"
     And I press "C-;"
-    And I press "TAB"
+    And I press "M-;"
+    And I press ";"
     Then I should see "foo(a = 2, b = 4, c = 8)"
 
   Scenario: Smart parens do not work in comment

@@ -658,10 +658,19 @@ position where scanning started, as passed to this function."
       nil)))
 
 (defun essmeq--fallback (pos)
-  "Fallback completion at pos ATTN; what will this do in strings and comments"
+  "Fallback completion at position POS forcing use of the `base' context.
+If a completion is made, return a dotted list of the
+form (OP-STRING 0 START . POS), with a form similar to that
+returned by `essmeq--complete' except the first element is the
+operator string to use rather than an integer index into the
+target table. This enables the fallback to be used when matching
+under an arbitrary context. If no completion can be made, return
+nil."
   (when-let ((matcher (map-elt essmeq--matcher-alist 'base)))
     (essmeq--with-matcher (fsm targets span partial) matcher
-      (essmeq--complete fsm partial pos (- pos span)))))
+      (let ((m (essmeq--complete fsm partial pos (- pos span))))
+        ;; Replace the index by the operator string
+        (when m (cons (aref targets (car m)) (cdr m)))))))
 
 
 ;;; Key Configuration and Utilities
@@ -905,16 +914,14 @@ This can have one of the following values:
                  string
                  function))
 
-(defcustom ess-smart-equals-narrow-function nil
+(defvar-local ess-smart-equals-narrow-function nil
   "If non-nil, a nullary function to restrict syntax checking to a region.
 This is useful in cases such as `inferior-ess-r-mode' where
 attention should be focused on a prompt line or the region
 between prompts, both for efficiency and because output or
 erroneous input on earlier prompts can confuse the syntax
 checker. See `ess-smart-equals-repl-narrow' and
-`ess-smart-equals-options'."
-  :group 'ess-edit
-  :type '(choice (const :tag "None" nil) function))
+`ess-smart-equals-mode-options'.")
 
 (defcustom ess-smart-equals-insertion-hook nil
   "A function called when an operator is inserted into the current buffer.
@@ -1013,9 +1020,9 @@ the next time the transient map in `ess-smart-equals' exits."
                                          data))))
             matchers))))
 
-(defcustom ess-smart-equals-mode-updates
+(defcustom ess-smart-equals-mode-options
   '((inferior-ess-r-mode
-     (ess-smart-equals-wrapping-function . essmeq--comint-narrow)))
+     (ess-smart-equals-narrow-function . ess-smart-equals-comint-narrow)))
   "Mode-specific updates of `ess-smart-equals-mode' options.
 This is an alist mapping major mode (symbols) to an alist of
 option settings that will supersede the default settings when
@@ -1105,13 +1112,77 @@ Do not set this directly")
       (setq essmeq--matcher-alist
             (essmeq--build-matchers (map-elt contexts t))))))
 
-(defun ess-smart-equals-repl-narrow ()
+(defun ess-smart-equals-set-options (mode &optional option-alist)
+  "Set mode-specific options for MODE in current buffer.
+OPTION-ALIST, which defaults to `ess-smart-equals-mode-options',
+maps major mode symbols to an alist mapping option variables to
+their values. The entries in this latter alist are of the
+form (VAR . VALUE). Typically, VAR will be a symbol for a
+buffer-local option."
+  (interactive (list major-mode nil))
+  (let ((options-alist (or option-alist ess-smart-equals-mode-options)))
+    (when mode
+        (let ((options (alist-get mode options-alist)))
+          (dolist (option options mode)
+            (set (car option) (cdr option)))))))
+
+(defun ess-smart-equals-prompts ()
+  "Ask R for current primary and secondary prompts.
+Return pair of regexes matching the two prompts, (PRIMARY . SECONDARY)."
+  (let ((proc (if (derived-mode-p 'inferior-ess-mode)
+                  (get-buffer-process (current-buffer))
+                (ess-get-next-available-process "R" t)))
+        (cmd "c(options()$prompt, options()$continue)\n"))
+    (if (not proc)
+        (cons (regexp-quote (or inferior-ess-primary-prompt "> "))
+              (regexp-quote (or inferior-ess-secondary-prompt "+ ")))
+      (with-temp-buffer
+        (ess-command cmd (current-buffer) nil nil nil proc)
+        (goto-char (point-min))
+        (search-forward-regexp " \"\\([^\"]+\\)\" \"\\([^\"]+\\)\" *$" nil t)
+        (cons (regexp-quote (match-string 1))
+              (regexp-quote (match-string 2)))))))
+
+;; ATTN: only handles the comint-use-prompt-regexp case in the input sender,
+;; though comint-prompt-regexp is not used explicitly. This should probably
+;; handle the field case for completeness, but it is unclear whether that
+;; will make any practical difference.
+(defun essmeq--r-repl-current-region ()
+  "Return region around point for syntax checking in R repl output buffer."
+  (if-let* ((proc (get-buffer-process (current-buffer)))
+            (pm (process-mark proc))
+            ((> (point) pm)))
+      (list (marker-position pm) (point-max))
+    (pcase-let* ((`(,primary . ,secondary) (ess-smart-equals-prompts))
+                 (prompt-re (concat primary "\\|" secondary))
+                 (point-line-p
+                  (save-excursion
+                    (beginning-of-line)
+                    (looking-at-p prompt-re)))
+                 (paragraph-separate "\^L")
+                 (paragraph-start (concat primary "\\|" paragraph-separate)))
+      (if point-line-p
+          (save-excursion
+            (unless (looking-at-p primary)
+              (backward-paragraph)
+              (skip-chars-forward "\n 	"))
+            (comint-skip-prompt)
+            (list (point) (progn
+                            (forward-line)
+                            (while (looking-at-p secondary)
+                              (forward-line))
+                            (point))))
+        (list (save-excursion
+                (backward-paragraph)
+                (skip-chars-forward "\n 	")
+                (while (looking-at-p prompt-re)
+                  (forward-line))
+                (point))
+              (save-excursion (forward-paragraph) (point)))))))
+
+(defun ess-smart-equals-comint-narrow ()
   "ATTN"
-  (let* ((proc (get-buffer-process (current-buffer)))
-         (pmark (process-mark proc)))
-    (if (> (point) pmark)
-        (narrow-to-region pmark (point-max))
-      :ATTN)))
+  (apply #'narrow-to-region (essmeq--r-repl-current-region)))
 
 
 ;;; Contexts
@@ -1179,23 +1250,6 @@ limit to matches to the %-operators."
           (push (match-string 1) ops))
         (nreverse ops)))))
 
-(defun ess-smart-equals-prompts ()
-  "Ask R for current primary and secondary prompts.
-Return pair of prompt strings (PRIMARY . SECONDARY)."
-  (let ((proc (if (derived-mode-p 'inferior-ess-mode)
-                  (get-buffer-process (current-buffer))
-                (ess-get-next-available-process "R" t)))
-        (cmd "c(options()$prompt, options()$continue)\n"))
-    (if (not proc)
-        (cons (regexp-quote (or inferior-ess-primary-prompt "> "))
-              (regexp-quote (or inferior-ess-secondary-prompt "+ ")))
-      (with-temp-buffer
-        (ess-command cmd (current-buffer) nil nil nil proc)
-        (goto-char (point-min))
-        (search-forward-regexp " \"\\([^\"]+\\)\" \"\\([^\"]+\\)\" *$" nil t)
-        (cons (regexp-quote (match-string 1))
-              (regexp-quote (match-string 2)))))))
-
 
 ;;; Processing the Action Key
 
@@ -1236,14 +1290,10 @@ should be ignored."
                                (mod (1+ accepted) num-ops)
                              accepted))
                        (mtype (if (zerop slen) :exact slen))
-                       (op-string (aref targets op)))
+                       (op-string (if (integerp op) (aref targets op) op)))
                   (list context mtype op-string start pos))
               (list context :no-match (aref targets 0) pos pos)))
         (list context :literal "=" pt pt t)))))
-
-(defvar essmeq--last-search nil
-  "Result of the last operator search via `essmeq--search' or nil if none.
-This is set only in `essmeq--process'.")
 
 (defun essmeq--process (&optional no-partial)
   "Insert, cycle, or complete an operator at point based on context.
@@ -1254,19 +1304,18 @@ search (see `essmeq--search') if the hook is non-nil."
     (when ess-smart-equals-narrow-function
       (funcall ess-smart-equals-narrow-function))
     (let* ((match (essmeq--search (point) no-partial))
-           (spec (cddr match)))
-      (thread-last spec
-        (apply #'essmeq--replace-region)
-        cdr ;; end position after padding
-        goto-char)
-      (setq essmeq--last-search match)
+           (spec (cddr match))
+           (after (apply #'essmeq--replace-region spec)))
+      (goto-char (cdr after)) ; end position after padding
       (when ess-smart-equals-insertion-hook
+        (setf (nth 3 spec) (car after)  ; adjust beg..end positions
+              (nth 4 spec) (cdr after))
         (apply ess-smart-equals-insertion-hook spec)))))
 
 (defun essmeq--remove ()
   "Remove a matching operator at point based on context, else one character."
   (interactive)
-  (let* ((match (cdr (or essmeq--last-search (essmeq--search nil t))))
+  (let* ((match (cdr (essmeq--search nil t)))
          (mtype (car match))
          (beg (caddr match))
          (end (cadddr match)))
@@ -1295,7 +1344,7 @@ operator string as is."
                                         (mapcar #'cdr)
                                         (apply #'append)
                                         delete-dups))))
-  (let* ((match (cdr (or essmeq--last-search (essmeq--search nil t))))
+  (let* ((match (cdr (essmeq--search nil t)))
          (mtype (car match))
          (beg (caddr match))
          (end (cadddr match)))
@@ -1394,9 +1443,9 @@ applies to any region from point forward."
 (defvar essmeq--paren-map (let ((m (make-sparse-keymap)))
                             (define-key m (kbd ",") 'essmeq--paren-comma)
                             (define-key m (kbd ")") 'essmeq--paren-escape)
-                            (define-key m (kbd ";") 'essmeq--paren-expand)
-                            (define-key m (kbd "C-;") 'essmeq--paren-slurp)
-                            (define-key m [?\t] 'essmeq--paren-escape)
+                            (define-key m (kbd ";") 'essmeq--paren-escape)
+                            (define-key m (kbd "C-;") 'essmeq--paren-expand)
+                            (define-key m (kbd "M-;") 'essmeq--paren-slurp)
                             m)
   "Keymap active in fresh space in the middle of a new smart open paren.")
 (fset 'essmeq--paren-map essmeq--paren-map)
@@ -1511,7 +1560,8 @@ function of the same name instead."
   :keymap ess-smart-equals-mode-map
   (when ess-smart-equals-mode
     (ess-smart-equals-update-keymaps)
-    (ess-smart-equals-set-contexts major-mode)))
+    (ess-smart-equals-set-contexts major-mode)
+    (ess-smart-equals-set-options major-mode)))
 
 
 (provide 'ess-smart-equals)

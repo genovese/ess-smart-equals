@@ -263,16 +263,16 @@ the following features:
     that makes it easy to fill, escape, and expand the parenthesis
     pair. In particular, when on this space:
 
-    - ')' or TAB eliminates the magic space and exits the parentheses;
+    - ')' or ';' eliminates the magic space and exits the parentheses;
 
     - ',' inserts a spaced comma, leaving point on the magic space;
 
-    - ';' expands the region after the parenthesis pair to encompass
-      an additional balanced expression; and
+    - 'C-;' expands the region after the parenthesis pair to
+      encompass an additional balanced expression; and
 
-    - 'C-;' moves the marked region after the pair (e.g., as constructed
-      by ';') inside the parentheses, eliminating leading spaces unless
-      a prefix argument is given.
+    - 'M-;' moves the marked region after the pair (e.g., as
+      constructed by 'C-;') inside the parentheses, eliminating
+      leading spaces unless a prefix argument is given.
 
     Taken together, these make it fast to fill in function calls
     or conditionals.
