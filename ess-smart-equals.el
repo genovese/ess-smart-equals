@@ -1,4 +1,4 @@
-;;; ess-smart-equals.el --- a flexible, context-sensitive assignment key for R and S  -*- lexical-binding: t; -*-
+;;; ess-smart-equals.el --- flexible, context-sensitive assignment key for R/S  -*- lexical-binding: t; -*-
 
 ;; Copyright (C) 2015-2019 Christopher R. Genovese, all rights reserved.
 
@@ -8,7 +8,7 @@
 ;; URL: https://github.com/genovese/ess-smart-equals
 ;; Version: 0.3.0
 ;; Package-Version: 0.3.0
-;; Package-Requires: ((emacs "25") (ess "16.10"))
+;; Package-Requires: ((emacs "25.1") (ess "16.10"))
 
 
 ;;; License:
@@ -229,7 +229,7 @@
 (require 'map)
 (require 'skeleton)
 
-(require 'ess-r-mode)
+(require 'ess-r-mode)  ;; included in ess package
 
 
 ;;; Utility Macros
@@ -252,12 +252,12 @@ which was in turn borrowed from the EIEIO package."
        (cl-symbol-macrolet  ;; each spec => a symbol macro to an (aref ....)
            ,(mapcar (lambda (entry)
                       (let* ((slot-var  (if (listp entry) (car entry) entry))
-			     (slot (if (listp entry) (cadr entry) entry))
-			     (idx (cl-struct-slot-offset type slot)))
+                             (slot (if (listp entry) (cadr entry) entry))
+                             (idx (cl-struct-slot-offset type slot)))
                         (list slot-var `(aref ,obj ,idx))))
                     spec-list)
          (unless (cl-typep ,obj ',type)
-	   (error "%s is not of type %s" ',inst ',type))
+           (error "%s is not of type %s" ',inst ',type))
          ,(if (cdr body) `(progn ,@body) (car body))))))
 
 (defmacro essmeq--with-matcher (spec-list inst &rest body)
@@ -291,9 +291,9 @@ Return the value of the last form in BODY. Markers are guaranteed
 to be cleared even if BODY exits non-locally. Note that as a
 consequence, the markers themselves should not be returned. If
 any of the markers is a desired value of this form, either
-`essmeq-copy-marker' or `copy-marker' should be used, but note
-that unlike the former, the latter does not copy the insertion
-type of the marker by default.
+`ess-smart-equals-copy-marker' or `copy-marker' should be used,
+but note that unlike the former, the latter does not copy the
+insertion type of the marker by default.
 
 SPEC is a list whose elements must have one of the following
 forms: 1. SYMBOL; 2. (SYMBOL POSITION), where POSITION is an
@@ -338,7 +338,7 @@ the marker is created with the corresponding `point-marker',
 
 ;;; Marker Interface
 
-(defun essmeq-make-marker (&optional position type init)
+(defun ess-smart-equals-make-marker (&optional position type init)
   "Like `make-marker' but also optionally initializes POSITION and TYPE.
 POSITION can be any value of the same argument in `set-marker'.
 TYPE is nil or t, as with the corresponding argument to
@@ -352,11 +352,11 @@ Returns the initialized marker."
     (when type (set-marker-insertion-type m t))
     m))
 
-(defun essmeq-copy-marker (&optional marker type)
+(defun ess-smart-equals-copy-marker (&optional marker type)
   "Like `copy-marker' but copies insertion type if MARKER but not TYPE is given."
   (copy-marker marker (or type (and marker (marker-insertion-type marker)))))
 
-(defsubst essmeq-clear-marker (marker)
+(defsubst ess-smart-equals-clear-marker (marker)
   "Reset MARKER so that it points nowhere and does not affect current buffer."
   (set-marker marker nil))
 
