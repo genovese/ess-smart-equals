@@ -8,7 +8,7 @@
 ;; URL: https://github.com/genovese/ess-smart-equals
 ;; Version: 0.3.0
 ;; Package-Version: 0.3.0
-;; Package-Requires: ((emacs "25.1") (ess "16.10"))
+;; Package-Requires: ((emacs "25.1") (ess "18.10"))
 
 
 ;;; License:
