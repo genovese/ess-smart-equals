@@ -115,13 +115,13 @@
 
 (require 'ess-site)
 
-(defvar ess-smart-equals--last-assign-key
-  ess-smart-S-assign-key
+(defvar ess-smart-equals-assign-key
+  "="
   "Cached value of previous smart assignment key.")
 
-(defvar ess-smart-equals--last-assign-str
-  ess-S-assign
-  "Cached value of previous assignment string.")
+;; (defvar ess-smart-equals--last-assign-str
+;;   ess-S-assign
+;;   "Cached value of previous assignment string.")
 
 (defun ess-smart-equals--strip-leading-space (string)
   "Strip one leading space from STRING, if present."
@@ -134,7 +134,7 @@
 (defun ess-smart-equals--maybe-narrow ()
   "Narrow to relevant part of buffer in various ess-related modes."
   (ignore-errors
-    (when (and (eq major-mode 'inferior-ess-mode)
+    (when (and (eq major-mode 'inferior-r-ess-mode)
                (> (point) (process-mark (get-buffer-process (current-buffer)))))
       (narrow-to-region (process-mark (ess-get-process)) (point-max)))
     (and ess-noweb-mode
@@ -147,11 +147,11 @@
 (defun ess-smart-equals--after-assign-p ()
   "Are we looking backward at `ess-S-assign'?
 If so, return number of characters to its beginning; otherwise, nil."
-  (let ((ess-assign-len (length ess-S-assign)))
+  (let ((ess-assign-len (length ess-smart-equals-assign-key)))
     (when (and (>= (point) (+ ess-assign-len (point-min))) ; enough room back
                (save-excursion
                  (backward-char ess-assign-len)
-                 (looking-at-p ess-S-assign)))
+                 (looking-at-p ess-smart-equals-assign-key)))
       ess-assign-len)))
 
 ;;;###autoload
@@ -181,7 +181,7 @@ is always inserted as is."
        (t
         (let ((back-by (ess-smart-equals--after-assign-p)))
           (if (not back-by)
-              (insert ess-S-assign)
+              (insert "<-")
             (delete-char (- back-by))
             (insert "== "))))))))
 
@@ -196,13 +196,13 @@ preceded by a comparison (<>!=) becomes a space-padded comparison operator,
 and otherwise just an '=' is inserted. The specific rules are as follows:
 
   1. In a string or comment or with a non-S language, just insert '='.
-  2. If a space (or tab) preceeds the '=', insert a version of `ess-S-assign'
+  2. If a space (or tab) preceeds the '=', insert a version of `ess-smart-equals-assign-key'
      with no leading space (e.g., '<- ') so that assignment is surrounded
      by at least one space. (Other preceeding spaces are left alone.)
   3. If any of '=<>!' preceed the current '=', insert an '= ', but
      if no space preceeds the preceeding character, insert a space
      so that the resulting binary operator is surrounded by spaces.
-  4. If the `ess-S-assign' string (e.g., '<- ') precedes point,
+  4. If the `ess-smart-equals-assign-key' string (e.g., '<- ') precedes point,
      insert '== ' (a double *not* a single equals).
   5. Otherwise, just insert an '='.
 
@@ -219,19 +219,11 @@ effect and will be lost when the mode is disabled."
      :lighter nil
      :require 'ess-site
      (if (not ess-smart-equals-mode)
-         (progn ; reset to default with previous assign key
-           (setq ess-S-assign ess-smart-equals--last-assign-str)
-           (ess-toggle-S-assign nil) ; clear smart assignment
-           (setq ess-smart-S-assign-key ess-smart-equals--last-assign-key)
-           (ess-toggle-S-assign t))
-       (setq ess-smart-equals--last-assign-key ess-smart-S-assign-key)
-       (setq ess-smart-equals--last-assign-str ess-S-assign)
-       (setq ess-S-assign (ess-smart-equals--strip-leading-space ess-S-assign))
-       (setq ess-smart-S-assign-key "=")
-       (ess-toggle-S-assign nil)   ;; reset ess map bindings
-       (define-key ess-mode-map ess-smart-S-assign-key 'ess-smart-equals)
-       (define-key inferior-ess-mode-map ess-smart-S-assign-key
-         'ess-smart-equals)))
+         (progn
+           (define-key ess-r-mode-map ess-smart-equals-assign-key 'self-insert-command)
+           (define-key inferior-ess-r-mode-map ess-smart-equals-assign-key 'self-insert-command)))
+     (define-key ess-r-mode-map ess-smart-equals-assign-key 'ess-smart-equals)
+     (define-key inferior-ess-r-mode-map ess-smart-equals-assign-key 'ess-smart-equals))
 
 
 (provide 'ess-smart-equals)
