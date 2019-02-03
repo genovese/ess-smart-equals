@@ -133,6 +133,24 @@
 ;;  directly from the github repository and put the file `ess-smart-equals.el'
 ;;  in your Emacs load path.
 ;;
+;;  A variety of activation options is described below, but tl;dr:
+;;  the recommended way to activate the mode (e.g., in your init
+;;  file) is either directly with
+;;
+;;    (setq ess-smart-equals-extra-ops '(brace paren percent))
+;;    (with-eval-after-load 'ess-r-mode
+;;      (require 'ess-smart-equals)
+;;      (ess-smart-equals-activate))
+;;
+;;  or with use-package:
+;;
+;;    (use-package ess-smart-equals
+;;      :init   (setq ess-smart-equals-extra-ops '(brace paren percent))
+;;      :after  (:any ess-r-mode inferior-ess-r-mode ess-r-transcript-mode)
+;;      :config (ess-smart-equals-activate))
+;;
+;;  A more detailed description follows, if you want to see variations.
+;;
 ;;  To activate, you need only do
 ;;
 ;;      (with-eval-after-load 'ess-r-mode
@@ -172,17 +190,21 @@
 ;;  -------
 ;;  To run the tests, install cask and do `cask install' in the
 ;;  ess-smart-equals project directory. Then, at the command line,
-;;  do
+;;  from the project root directory do
 ;;
 ;;      cask exec ert-runner
 ;;      cask exec ecukes --reporter magnars
+;;
+;;  and if manual testing is desired do
+;;
+;;      cask emacs -Q -l test/manual-init.el --eval '(cd "~/")' &
 ;;
 ;;  Additional test cases are welcome in pull requests.
 ;;
 
 ;;; Change Log:
 ;;
-;;  0.2.0 -- Breaking changes in functionality, design, and configuration.
+;;  0.3.0 -- Breaking changes in functionality, design, and configuration.
 ;;           No longer relies on `ess-S-assign' which was deprecated in
 ;;           ESS. Now provides more powerful context-sensitive, prioritized
 ;;           operator lists with cycling and completion. The mode is now,
@@ -190,7 +212,10 @@
 ;;           to relevant mode hooks for ESS R modes. Updated required
 ;;           versions of emacs and ESS.
 ;;
-;;  0.1.1 -- Initial release with simple insertion and completion, with
+;;  0.2.2 -- Fix for deprecated ESS variables `ess-S-assign' and
+;;           `ess-smart-S-assign-key'. Thanks to Daniel Gomez (@dangom).
+;;
+;;  0.2.1 -- Initial release with simple insertion and completion, with
 ;;           space padding for the operators except for a single '='
 ;;           used to specify named arguments in function calls. Relies on
 ;;           ESS variables `ess-S-assign' and `ess-smart-S-assign-key'

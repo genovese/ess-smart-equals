@@ -62,7 +62,7 @@ this package is loaded.
 The function `ess-smart-equals-activate` arranges for the minor mode
 to be activated by mode hooks for any given list of major modes,
 defaulting to ESS major modes associated with R (`ess-r-mode`,
-`inferior-ess-r-mode`, `ess-r-transcript-mode`, `ess-roxy-mode`). 
+`inferior-ess-r-mode`, `ess-r-transcript-mode`, `ess-roxy-mode`).
 
 
 ## Examples
@@ -116,13 +116,31 @@ manager. Alternatively, you can clone or download the source
 directly from the github repository and put the file
 `ess-smart-equals.el` in your Emacs load path.
 
+A variety of activation options is described below,
+but tl;dr: the *recommended* way to activate the mode (e.g.,
+in your init file) is either directly with
+
+    (setq ess-smart-equals-extra-ops '(brace paren percent))
+    (with-eval-after-load 'ess-r-mode
+      (require 'ess-smart-equals)
+      (ess-smart-equals-activate))
+
+or with `use-package`:
+
+    (use-package ess-smart-equals
+      :init   (setq ess-smart-equals-extra-ops '(brace paren percent))
+      :after  (:any ess-r-mode inferior-ess-r-mode ess-r-transcript-mode)
+      :config (ess-smart-equals-activate))
+
+A more detailed description follows, if you want to see variations.
+
 To activate, you need only do
 
     (with-eval-after-load 'ess-r-mode
       (require 'ess-smart-equals)
       (ess-smart-equals-activate))
 
-somewhere in your init file. This will add `ess-smart-equals-mode` to 
+somewhere in your init file. This will add `ess-smart-equals-mode` to
 a prespecified, but customizable, list of mode hooks and activate
 the mode in already active buffers.
 
@@ -202,7 +220,7 @@ by the major mode and the syntactic context at point. The customizable
 variable `ess-smart-equals-contexts` specifies the mapping
 from syntactic contexts to a list of operators to consider in the
 order specified. This mapping is given for all contexts for the
-default case (t) along with lists for any major mode 
+default case (t) along with lists for any major mode
 that are merged into the default mapping under that mode.
 In this way, simple modifications can be applied to any relevant
 mode without repeating all the specifications.
@@ -264,7 +282,7 @@ but it can be set in `ess-smart-equals-options` if desired.
 The customizable variable `ess-smart-equals-insertion-hook`, if set,
 allows arbitrary post-processing after an operator insertion. It is
 passed all the information needed to characterize the insertion; see
-the documentation for that variable for details. 
+the documentation for that variable for details.
 
 
 ### Extra Smart Operators
@@ -319,7 +337,7 @@ the following features:
 With a prefix argument, all of these insert the literal corresponding
 character, with repeats if the argument is numeric.
 
-Additional smart operators may be added in future versions.    
+Additional smart operators may be added in future versions.
 
 Note that if you change the setting of `ess-smart-equals-extra-ops`,
 you can make it take effect in all relevant buffers by doing
@@ -340,7 +358,7 @@ you can make it take effect in all relevant buffers by doing
     `ess-smart-S-assign-key`. Thanks to Daniel Gomez (@dangom).
 
 -   **0.2.1:** Initial release with simple insertion and completion, with
-    space padding for the operators except for a single '=' 
+    space padding for the operators except for a single '='
     used to specify named arguments in function calls. Relies on
     ESS variables `ess-S-assign` and `ess-smart-S-assign-key`
     to specify preferred operator for standard assignments.
