@@ -1,13 +1,14 @@
+
 # ess-smart-equals.el
 
 Assignment in R is syntactically complicated by three features: 1. the
-historical role of '<sub>'</sub> (underscore) as an assignment character in
+historical role of '\_' (underscore) as an assignment character in
 the S language (SPlus may still allow this); 2. the somewhat
 inconvenient-to-type, if conceptually pure, '<-' operator as the
 preferred assignment operator; and 3. the ability to use either
 an '=' or an '<-' for assignment.
 
-ESS uses '<sub>'</sub> as a (default) smart assignment character which expands
+ESS uses '\_' as a (default) smart assignment character which expands
 to the '<-' with one invokation and gives an underscore on two.
 This makes it rather painful to use underscores in variable, field,
 and function names. Moreover, \_ no longer has any association with
@@ -18,7 +19,7 @@ such as '=', but that raises other inconviences because of the multiple
 roles that '=' can play (assignment and default argument setting).
 
 This package gives an alternative smart assignment for R and S code
-that is tied to the '=' key instead of the '<sub>'</sub> key. It intelligently
+that is tied to the '=' key instead of the '\_' key. It intelligently
 handles the various ways that '=' is used in R (and S) by examining
 the preceding context. It works under the assumption that '=' used
 for default arguments to functions **will not** be surrounded by
@@ -53,6 +54,7 @@ in #4 above, the second '=' key is assumed to be intended as an equality
 comparison because the assignment would have been produced by an '='
 following a space.
 
+
 ## Installation
 
 This package is available on [MELPA](http://melpa.org), and you can install it with
@@ -75,6 +77,7 @@ to update your dependencies.
 Finally, you can put `ess-smart-equals.el` anywhere on
 your `load-path`.
 
+
 ## Usage
 
 The package defines a minor mode `ess-smart-equals-mode`
@@ -90,7 +93,7 @@ You will likely want the mode enabled automatically
 in the appropriate buffers, so put
 
     (add-hook 'ess-mode-hook 'ess-smart-equals-mode)
-    (add-hook 'inferior-ess-mode-hook 'ess-smart-equals-mode)
+    (add-hook 'inferior-ess-mode-hook 'ess-smart-equals-mode)  
 
 in your `.emacs` file. Of course, you will need to install
 `ess` first.
@@ -111,6 +114,7 @@ the package `use-package` to :
                      (add-hook 'inferior-ess-mode-hook 'ess-smart-equals-mode)))
                 (use-package ess-smart-equals :ensure t)))
 
+
 ## Examples
 
 In the left column below, ^ marks the location at which an '='
@@ -127,3 +131,21 @@ position of point.
     "foo ^             "foo =^
     #...foo ^          #...foo =^
     foo <- ^           foo == ^
+
+
+## Change Log
+
+-   **0.2.2:** Fix for deprecated ESS variables `ess-S-assign` and
+    `ess-smart-S-assign-key`. Thanks to Daniel Gomez (@dangom).
+
+-   **0.2.1:** Initial release with simple insertion and completion, with
+    space padding for the operators except for a single '='
+    used to specify named arguments in function calls. Relies on
+    ESS variables `ess-S-assign` and `ess-smart-S-assign-key`
+    to specify preferred operator for standard assignments.
+
+
+## Contributors
+
+-   Daniel Gomez (@dangom)
+

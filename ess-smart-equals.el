@@ -109,6 +109,15 @@
 ;;
 
 ;;; Change Log:
+;;
+;;  0.2.2 -- Fix for deprecated ESS variables `ess-S-assign' and
+;;           `ess-smart-S-assign-key'. Thanks to Daniel Gomez (@dangom).
+;;
+;;  0.2.1 -- Initial release with simple insertion and completion, with
+;;           space padding for the operators except for a single '='
+;;           used to specify named arguments in function calls. Relies on
+;;           ESS variables `ess-S-assign' and `ess-smart-S-assign-key'
+;;           to specify preferred operator for standard assignments.
 
 
 ;;; Code:
