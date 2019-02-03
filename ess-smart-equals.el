@@ -733,11 +733,11 @@ make this change take effect."
          (ess-smart-equals-refresh-mode)))
 
 (defcustom ess-smart-equals-cancel-keys (list [backspace]
-                                              (kbd "<DEL>")
-                                              (kbd "C-g"))
+                                              (kbd "<DEL>"))
   "List of keys transiently bound to cancel operator insertion or cycling.
-Except for C-g, a shifted version of each will instead delete backwards a
-character, making it easy to delete only part of an operator if desired.
+A shifted version of each will instead delete backwards a
+character, clearing the transient keymap and making it easy to
+delete only part of an operator if desired.
 
 For changes in this variable to take effect, some precomputed
 information must be refreshed in `ess-smart-equals-mode' buffers.
@@ -786,8 +786,7 @@ clear the last insertion. It defaults to
     (dolist (key cancel-keys)
       (define-key map key #'essmeq--remove)
       (when (and (or (stringp key) (vectorp key))
-                 (= (length key) 1)
-                 (not (eq (aref key 0) 7))) ;; Skip C-g
+                 (= (length key) 1))
         (define-key map ;; make shift-cancel just do regular backspace
           (vector (if (listp (aref key 0))
                       (cons 'shift (aref key 0))

@@ -142,20 +142,22 @@ of this is
              (ess-r-transcript-mode . ess-smart-equals-mode)
              (ess-roxy-mode . ess-smart-equals-mode))
 
-To also activate the extra smart operators and automatically bind
-them, you can replace this with
+To also activate the extra smart operators, *which I recommend*,
+and to automatically bind them, you can replace this with
 
     (use-package ess-smart-equals
       :init   (setq ess-smart-equals-extra-ops '(brace paren percent))
       :after  (:any ess-r-mode inferior-ess-r-mode ess-r-transcript-mode)
       :config (ess-smart-equals-activate))
 
+This is the setup that I use. See **Extra Smart Operators** below.
+
 You can also enable the minor mode in any buffer with
 
     M-x ess-smart-equals-mode
 
-though you will typically want to enable the mode
-in a mode hook, e.g.,
+though you will typically want to enable the minor mode
+in a corresponding mode hook, e.g.,
 
     (add-hook 'foo-mode-hook 'ess-smart-equals-mode)
 
@@ -176,19 +178,21 @@ the package is loaded, as the key affects several internal keymaps.
 When `ess-smart-equals-key` is pressed, several transient keys are
 bound. First, the basic key of `ess-smart-equals-key` (e.g., '='
 for '=' or 'C-c ='.) reexecutes `ess-smart-equals`, cycling the
-operators according to context. Any other key exits the transient
-keymap. Second, any key in `ess-smart-equals-cancel-keys` deletes any
+operators according to context. If the smart '%' operator is enabled
+(see below), then '%' is also bound to `ess-smart-equals-percent`,
+which can be interleaved with `ess-smart-equals` as desired.
+(Any other key exits the transient
+keymap.) Second, any key in `ess-smart-equals-cancel-keys` deletes any
 inserted operator before point; a shifted version of such a
-key (except `C-g`) deletes a single character backwards and thus
+key deletes a single character backwards and thus
 cancels the transient bindings. Finally, tab allows you to select an
 operator by completion.
 
-An advanced customization is to change the condition for exiting the
-transient map in this situation. See
-`ess-smart-equals-transient-exit-function`.
+The `ess-smart-equals-cancel-keys` are by default `backspace` and `DEL`,
+but they can be customized.
 
-Several other useful smart operators can be configured;
-see **Extra Operators** below.
+Several other useful smart operators can be configured; see **Extra
+Smart Operators** below.
 
 
 ### Contexts
@@ -207,8 +211,39 @@ The user can create new contexts by adding additional keys to that
 mapping and defining `ess-smart-equals-context-function`. This is
 called first when the context is determined; if it returns a symbol,
 that is used as the context; if it returns nil, the built-in context
-calculation is performed. An advanced customization allows local
-change to the context, see `ess-smart-equals-overriding-context`.
+calculation is performed. For specialized purposes, the context can
+be overridden locally; see `ess-smart-equals-set-overriding-context`
+and `ess-smart-equals-clear-overriding-context`.
+
+
+### Options
+
+Operator padding is controlled by two options:
+`ess-smart-equals-mode-padding-left` and
+`ess-smart-equals-mode-padding-right`, which control the padding on
+the left and right side of an inserted operator. If set to the
+symbol `one-space` (the default), `no-space`, or `some-space`,
+`ess-smart-equals` ensures that there is, respectively, exactly one
+space, no spaces, or at least one space (possibly taken from
+existing whitespace) on the corresponding side of the operator. If
+set to the symbol `none`, no padding adjustment is performed. If set
+to a string, that string is used as is for the padding on the
+corresponding side. Finally, this can be set to a function that
+takes two positions and an optional boolean; this function can
+adjust the padding in any way desired while also providing a way to
+compute how much padding has been added for the deletion operator.
+See the documentation for the padding variables for details.
+
+The customizable variable `ess-smart-equals-mode-options` is an alist
+mapping major modes to assignments of minor mode options used
+locally in each `ess-smart-equals-mode` buffer. This allows
+mode-specific configuraiton of this minor mode. The default is an
+example: in `inferior-ess-r-mode`, `ess-smart-equals-mode` uses
+specialized narrowing so that previous output and commands do not
+interfere with the context parsing at a given point.
+
+The customizable list `ess-smart-equals-default-modes` determines
+the major modes that area affected by `ess-smart-equals-activate`.
 
 
 ### Hooks
@@ -232,7 +267,7 @@ passed all the information needed to characterize the insertion; see
 the documentation for that variable for details. 
 
 
-### Extra Operators
+### Extra Smart Operators
 
 If `ess-smart-equals-extra-ops` is non-nil, it should be a list
 containing some of the symbols `brace`, `paren`, or `percent`.
@@ -286,6 +321,10 @@ character, with repeats if the argument is numeric.
 
 Additional smart operators may be added in future versions.    
 
+Note that if you change the setting of `ess-smart-equals-extra-ops`,
+you can make it take effect in all relevant buffers by doing
+`M-x ess-smart-equals-refresh-mode`.
+
 
 ## Change Log
 
@@ -310,12 +349,16 @@ Additional smart operators may be added in future versions.
 ## To Do
 
 -   Allow finer control in context operator lists, both in
-    distinguishing cycling from completion and in allowing
-    dynamic operator lists. An example use case would be
-    asking R for the set of current `%infix%` operators.
-    Some of the infrastructure for this is already in place.
+    distinguishing cycling from completion and in allowing dynamic
+    operator lists. An example use case would be asking R for the
+    set of current `%infix%` operators. Some of the infrastructure
+    for this is already in place.
 
--   Add `ess-smart-equals-the-works` for simple, full feature setup.
+-   Add `ess-smart-equals-the-works` for simple, full feature setup
+
+-   If it is worthwhile, make contexts sticky over cycling to avoid
+    the context changing during cycling. This does not yet appear
+    to be needed.
 
 -   Add more tests
 
