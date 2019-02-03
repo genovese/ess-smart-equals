@@ -19,6 +19,10 @@
 (require 'espuds)
 (require 'ess-smart-equals)
 
+(Setup
+ (when (boundp 'flymake-diagnostic-functions)
+   (remove-hook 'flymake-diagnostic-functions 'flymake-proc-legacy-flymake)))
+
 (Before
  (switch-to-buffer
   (get-buffer-create "*ess-smart-equals-tests*"))

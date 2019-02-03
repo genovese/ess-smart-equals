@@ -67,14 +67,14 @@
 ;;  otherwise just an '=' is inserted. The specific rules are as follows:
 ;;
 ;;   1. In a string or comment or with a non-S language, just insert '='.
-;;   2. If a space (or tab) preceeds the '=', insert a version of `ess-S-assign'
-;;      with no leading space (e.g., "<- "). (Other preceeding spaces are
-;;      left alone.)
+;;   2. If a space (or tab) preceeds the '=', insert a version of
+;;      `ess-smart-equals-assign-key' with no leading space (e.g., "<- ").
+;;      (Other preceeding spaces are left alone.)
 ;;   3. If any of =<>! preceed the current '=', insert an '= ', but
 ;;      if no space preceeds the preceeding character, insert a space
 ;;      so that the resulting binary operator is surrounded by spaces.
-;;   4. If the `ess-S-assign' string (e.g., "<- ") precedes point,
-;;      insert '== ' (a double *not* a single equals).
+;;   4. If the `ess-smart-equals-assign-key' string (e.g., "<- ") precedes
+;;      point, insert '== ' (a double *not* a single equals).
 ;;   5. Otherwise, just insert an '='.
 ;;
 ;;  With a prefix argument, '=' always just inserts an '='.
@@ -124,13 +124,8 @@
 
 (require 'ess-site)
 
-(defvar ess-smart-equals-assign-key
-  "="
+(defvar ess-smart-equals-assign-key "="
   "Cached value of previous smart assignment key.")
-
-;; (defvar ess-smart-equals--last-assign-str
-;;   ess-S-assign
-;;   "Cached value of previous assignment string.")
 
 (defun ess-smart-equals--strip-leading-space (string)
   "Strip one leading space from STRING, if present."
@@ -146,15 +141,17 @@
     (when (and (eq major-mode 'inferior-r-ess-mode)
                (> (point) (process-mark (get-buffer-process (current-buffer)))))
       (narrow-to-region (process-mark (ess-get-process)) (point-max)))
-    (and ess-noweb-mode
+    (and (boundp 'ess-noweb-mode)
+         ess-noweb-mode
          (ess-noweb-in-code-chunk)
          (ess-noweb-narrow-to-chunk))
     (and (fboundp 'pm/narrow-to-span)
+         (boundp 'polymode-mode)
          polymode-mode
          (pm/narrow-to-span))))
 
 (defun ess-smart-equals--after-assign-p ()
-  "Are we looking backward at `ess-S-assign'?
+  "Are we looking backward at `ess-smart-equals-assign-key'?
 If so, return number of characters to its beginning; otherwise, nil."
   (let ((ess-assign-len (length ess-smart-equals-assign-key)))
     (when (and (>= (point) (+ ess-assign-len (point-min))) ; enough room back
@@ -190,7 +187,7 @@ is always inserted as is."
        (t
         (let ((back-by (ess-smart-equals--after-assign-p)))
           (if (not back-by)
-              (insert "<-")
+              (insert "<- ")
             (delete-char (- back-by))
             (insert "== "))))))))
 
