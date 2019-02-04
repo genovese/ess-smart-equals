@@ -1,7 +1,7 @@
 
 # ess-smart-equals.el
 
-> Current Version: 0.3.0. This is a major update &#x2013; indeed a
+> Current Version: 0.3.1. This is a major update &#x2013; indeed a
 > complete rewrite &#x2013; relative to version 0.2.2, with significant
 > improvements in functionality, flexibility, and performance.
 > This has also been brought up to date with recent versions of

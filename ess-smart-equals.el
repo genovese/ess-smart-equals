@@ -6,8 +6,8 @@
 ;; Maintainer: Christopher R. Genovese <genovese@cmu.edu>
 ;; Keywords: R, S, ESS, convenience
 ;; URL: https://github.com/genovese/ess-smart-equals
-;; Version: 0.3.0
-;; Package-Version: 0.3.0
+;; Version: 0.3.1
+;; Package-Version: 0.3.1
 ;; Package-Requires: ((emacs "25.1") (ess "18.10"))
 
 
@@ -361,6 +361,353 @@ Returns the initialized marker."
   (set-marker marker nil))
 
 
+;;; Behavior Configuration
+
+(defcustom ess-smart-equals-padding-left 'one-space
+  "Specifies padding used on left side of inserted and completed operators.
+
+This can have one of the following values:
+
+   * The symbol `one-space' means to insert exactly one space, eliminating
+     any other contiguous whitespace on the left.
+
+   * The symbol `no-space' means to eliminate all adjacent whitespace on
+     the left.
+
+   * The symbol `some-space' means to ensure there is at least one space
+     on the left, either in existing whitespace (which is kept as is)
+     or by inserting a space if none.
+
+   * The symbol `none' means to insert no padding and make no change
+     to the surrounding whitespace. (A nil value has the same effect
+     but is marginally slower.)
+
+   * A string means to insert that string on the left.
+
+   * A function with signature (begin-ws begin &optional extent)
+
+     When inserting or completing an operator this function
+     should insert desired padding on the right. The function is
+     called within a `save-excursion', so point can be moved and
+     insertions made. In this case, the function is called with
+     two positions: BEGIN-WS is the position of the leftmost
+     contiguous whitespace character to the left of the operator
+     and BEGIN is the position of the left side of the operator.
+
+     When removing an operator, this function should return the
+     beginning of the padded region assuming that an operator has
+     just been inserted and padded (i.e., by calling this
+     function). It should not change the current buffer. This
+     case is distinguished by having the third argument EXTENT eq
+     to t and *both* BEGIN-WS and BEGIN pointing to the leftmost
+     point of the inserted operator.
+"
+  :group 'ess-edit
+  :type '(choice (const :tag "Only One Space" one-space)
+                 (const :tag "No Spaces" no-space)
+                 (const :tag "At Least One Space" some-space)
+                 (const :tag "No Padding" none)
+                 string
+                 function))
+
+(defcustom ess-smart-equals-padding-right 'one-space
+  "Specifies padding used on right side of inserted and completed operators.
+
+This can have one of the following values:
+
+   * The symbol `one-space' means to insert exactly one space, eliminating
+     any other contiguous whitespace on the right.
+
+   * The symbol `no-space' means to eliminate all adjacent whitespace on
+     the right.
+
+   * The symbol `some-space' means to ensure there is at least one space
+     on the right, either in existing whitespace (which is kept as is)
+     or by inserting a space if none.
+
+   * The symbol `none' means to insert no padding and make no change
+     to the surrounding whitespace. (A nil value has the same effect
+     but is marginally slower.)
+
+   * A string means to insert that string on the right.
+
+   * A function with signature (end end-ws &optional extent)
+
+     When inserting or completing an operator this function
+     should insert desired padding on the right. The function is
+     called within a `save-excursion', so point can be moved and
+     insertions made. In this case, the function is called with
+     two positions: END is the position of the right side of the
+     inserted operator and END-WS is the position of the
+     rightmost contiguous whitespace character to the right of
+     the operator.
+
+     When removing an operator, this function should return the
+     beginning of the padded region assuming that an operator has
+     just been inserted and padded (i.e., by calling this
+     function). It should not change the current buffer. This
+     case is distinguished by having the third argument EXTENT eq
+     to t and *both* END and END-WS pointing to the rightmost
+     point of the inserted operator.
+"
+  :group 'ess-edit
+  :type '(choice (const :tag "Only One Space" one-space)
+                 (const :tag "No Spaces" no-space)
+                 (const :tag "At Least One Space" some-space)
+                 (const :tag "No Padding" none)
+                 string
+                 function))
+
+(defvar-local ess-smart-equals-narrow-function nil
+  "If non-nil, a nullary function to restrict syntax checking to a region.
+This is useful in cases such as `inferior-ess-r-mode' where
+attention should be focused on a prompt line or the region
+between prompts, both for efficiency and because output or
+erroneous input on earlier prompts can confuse the syntax
+checker. See `ess-smart-equals-repl-narrow' and
+`ess-smart-equals-mode-options'.")
+
+(defcustom ess-smart-equals-insertion-hook nil
+  "A function called when an operator is inserted into the current buffer.
+This (non-standard hook) function should accept six arguments
+
+       CONTEXT MATCH-TYPE STRING START OLD-END PAD
+
+where CONTEXT is a context symbol, representing a key in the
+inner alists of `ess-smart-equals-contexts'; MATCH-TYPE is one of
+the keywords :exact, :partial, :no-match, or :literal; STRING is
+the operator string that was inserted; START is the buffer
+positions at the beginning of the inserted string (plus padding);
+OLD-END was the ending position of the previous content in the
+buffer; and PAD is a string giving the padding used on either
+side of the inserted operator, typically either empty or a single
+space.
+
+This feature is experimental and may be removed in a future version."
+  :group 'ess-edit
+  :type '(choice (const :tag "None" nil) function))
+
+(defcustom ess-smart-equals-default-modes
+  '(ess-r-mode inferior-ess-r-mode ess-r-transcript-mode ess-roxy-mode)
+  "List of major modes where `ess-smart-equals-activate' binds '=' by default."
+  :group 'ess-edit
+  :type '(repeat symbol))
+
+(defcustom ess-smart-equals-brace-newlines '((open after)
+                                             (close before))
+  "Controls auto-newlines for braces in `electric-smart-equals-open-brace'.
+Only applicable when `ess-smart-equals-extra-ops' contains the
+symbol `brace'. This is an alist with keys `open' and `close' and
+with values that are lists containing the symbols `after' and/or
+`before', indicating when a newline should be placed. A missing
+key is equivalent to a nil value, meaning to place no newlines.
+
+This can be controlled via Emacs's customization mechanism or can
+be added to your ESS style specification, as preferred."
+  :group 'ess-edit
+  :type '(alist :key-type (choice (const open) (const close))
+                :value-type (repeat (choice (const before) (const after)))))
+
+
+;;; Specialized overriding context and transient exit functions
+
+(defvar-local ess-smart-equals-overriding-context nil
+  "If non-nil, a context symbol that overrides the usual context calculation.
+Intended to be used in a transient manner, see
+`ess-smart-equals-transient-exit-function'.")
+
+(defvar-local ess-smart-equals-transient-exit-function nil
+  "If non-nil, a nullary function to be called on exit from the transient keymap.
+This can be used, for instance, to clear an overriding context.
+See `essmeq--transient-map'")
+
+(defvar-local essmeq--stop-transient nil
+  "A nullary function called to deactivate the most recent transient map.
+This is set automatically and should not be set explicitly. If
+non-nil, a nullary function to be called on exit from the
+transient keymap. This can be used, for instance, to clear an
+overriding context if something goes awry. See
+`essmeq--transient-map'.")
+
+(defun ess-smart-equals-clear-overriding-context ()
+  "Transient exit function that resets both itself and any overriding context.
+This is a convenience function for fixing a context during one
+cycle of smart equals insertion. See
+`ess-smart-equals-overriding-context' and
+`ess-smart-equals-transient-exit-function'.."
+  (setq ess-smart-equals-overriding-context      nil
+        ess-smart-equals-transient-exit-function nil))
+
+(defun ess-smart-equals-set-overriding-context (context)
+  "Force context to be symbol CONTEXT for next insertion only.
+This sets `ess-smart-equals-transient-exit-function' to clear the context
+the next time the transient map in `ess-smart-equals' exits."
+  (setq ess-smart-equals-overriding-context  context
+        ess-smart-equals-transient-exit-function
+          #'ess-smart-equals-clear-overriding-context))
+
+
+;;; Key Configuration and Utilities
+
+(defun ess-smart-equals-refresh-mode ()
+  "Re-enable `ess-smart-equals-mode' in all buffers where it is enabled.
+This has the effect of refreshing all the mode's keymaps,
+contexts, and options. It is intended for use in customization
+setters for options that affect pre-computed tables or keymaps,
+but it can be used interactively as well, for instance, after
+manually updating the values of such options."
+  (interactive)
+  (dolist (buf (buffer-list))
+    (with-current-buffer buf
+      (when (and (boundp 'ess-smart-equals-mode) ess-smart-equals-mode)
+        (let ((inhibit-message t))
+          (ess-smart-equals-mode 1))))))
+
+(defcustom ess-smart-equals-key "="
+  "The key for smart assignment operators when `ess-smart-equals-mode' active.
+
+For changes in this variable to take effect, some precomputed
+information must be refreshed in `ess-smart-equals-mode' buffers.
+Changing the variable through the customization mechanism does
+such a refresh automatically. If instead you manually change the
+value of this option (e.g., with `setq'), you can either disabled
+and re-enabled the minor mode in one such buffer or do
+
+   M-x ess-smart-equals-refresh-mode
+
+interactively, or (ess-smart-equals-refresh-mode) in lisp, to
+make this change take effect."
+  :group 'ess-edit
+  :type 'string
+  :initialize 'custom-initialize-default
+  :set (lambda (sym val)
+         (set-default sym val)
+         (ess-smart-equals-refresh-mode)))
+
+(defcustom ess-smart-equals-extra-ops nil
+  "If non-nil, a symbol list of extra smart operators to bind in the mode map.
+Currently, only `brace' and `paren' are supported.
+
+For changes in this variable to take effect, some precomputed
+information must be refreshed in `ess-smart-equals-mode' buffers.
+Changing the variable through the customization mechanism does
+such a refresh automatically. If instead you manually change the
+value of this option (e.g., with `setq'), you can either disabled
+and re-enabled the minor mode in one such buffer or do
+
+   M-x ess-smart-equals-refresh-mode
+
+interactively, or (ess-smart-equals-refresh-mode) in lisp, to
+make this change take effect."
+  :group 'ess-edit
+  :type '(choice (const nil) (repeat (const brace) (const paren)))
+  :initialize 'custom-initialize-default
+  :set (lambda (sym val)
+         (set-default sym val)
+         (ess-smart-equals-refresh-mode)))
+
+(defcustom ess-smart-equals-cancel-keys (list [backspace]
+                                              (kbd "<DEL>"))
+  "List of keys transiently bound to cancel operator insertion or cycling.
+A shifted version of each will instead delete backwards a
+character, clearing the transient keymap and making it easy to
+delete only part of an operator if desired.
+
+For changes in this variable to take effect, some precomputed
+information must be refreshed in `ess-smart-equals-mode' buffers.
+Changing the variable through the customization mechanism does
+such a refresh automatically. If instead you manually change the
+value of this option (e.g., with `setq'), you can either disabled
+and re-enabled the minor mode in one such buffer or do
+
+   M-x ess-smart-equals-refresh-mode
+
+interactively, or (ess-smart-equals-refresh-mode) in lisp, to
+make this change take effect."
+  :group 'ess-edit
+  :type '(repeat
+          (choice string (restricted-sexp :match-alternatives (vectorp))))
+  :initialize 'custom-initialize-default
+  :set (lambda (sym val)
+         (set-default sym val)
+         (ess-smart-equals-refresh-mode)))
+
+(defun essmeq--transient-equals (&optional literal)
+  "A version of `ess-smart-equals' for use in the transient key map.
+This detects previous use of `ess-smart-equals-percent' and clears that
+operator if the user switches to equals."
+  (interactive "P")
+  (ignore literal)
+  (when (eq last-command 'ess-smart-equals-percent)
+    (let ((ess-smart-equals-overriding-context '%))
+      (essmeq--remove 'only-match)))
+  (call-interactively #'ess-smart-equals))
+
+(defun essmeq--make-transient-map (&optional cancel-keys)
+  "Resets transient keymap used after `ess-smart-equals'.
+CANCEL-KEYS, if non-nil, is a list of keys in that map that will
+clear the last insertion. It defaults to
+`ess-smart-equals-cancel-keys', which see. See also
+`essmeq--transient-map'."
+  (let ((cancel-keys (or cancel-keys ess-smart-equals-cancel-keys))
+        (percentp (memq 'percent ess-smart-equals-extra-ops))
+        (map (make-sparse-keymap)))
+    (if (not percentp)
+        (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
+      (define-key map "%" #'ess-smart-equals-percent)
+      (define-key map (kbd ess-smart-equals-key) #'essmeq--transient-equals))
+    (define-key map "\t" #'essmeq--selected)
+    (dolist (key cancel-keys)
+      (define-key map key #'essmeq--remove)
+      (when (and (or (stringp key) (vectorp key))
+                 (= (length key) 1))
+        (define-key map ;; make shift-cancel just do regular backspace
+          (vector (if (listp (aref key 0))
+                      (cons 'shift (aref key 0))
+                    (list 'shift (aref key 0))))
+          'delete-backward-char)))
+    map))
+
+(defun essmeq--make-mode-map ()
+  "Returns the `ess-smart-equals-mode' keymap using current parameter values."
+  (let ((map (make-sparse-keymap)))
+    (define-key map ess-smart-equals-key 'ess-smart-equals)
+    (when (memq 'brace ess-smart-equals-extra-ops)
+      (define-key map "{" 'ess-smart-equals-open-brace))
+    (when (memq 'paren ess-smart-equals-extra-ops)
+      (define-key map "(" 'ess-smart-equals-open-paren))
+    (when (memq 'percent ess-smart-equals-extra-ops)
+      (define-key map "%" 'ess-smart-equals-percent))
+    map))
+
+(defvar ess-smart-equals-mode-map (essmeq--make-mode-map)
+  "Keymap used in `ess-smart-equals-mode' binding smart operators.")
+
+(defvar essmeq--transient-map (essmeq--make-transient-map)
+  "Map bound transiently after `ess-smart-equals' key is pressed.
+The map continues to be active as long as that key is pressed.")
+
+(defun ess-smart-equals-update-keymaps ()
+  "Force update of `ess-smart-equals-mode' keymaps to adjust for config changes.
+This should not usually need to be done explicitly by the user."
+  (interactive)
+  ;; The `ess-smart-equals-mode' entry in `minor-mode-map-alist' is identical
+  ;; to `ess-smart-equals-mode-map', if the map is set. In this case,
+  ;; simply doing `setq' will break the synchrony and the new map will
+  ;; not be reflected in the minor mode bindings. So we use `setcdr' instead.
+  (if (keymapp ess-smart-equals-mode-map)
+      (setcdr ess-smart-equals-mode-map (cdr (essmeq--make-mode-map)))
+    (setq ess-smart-equals-mode-map (essmeq--make-mode-map)))
+  (setq essmeq--transient-map (essmeq--make-transient-map)))
+
+(defun essmeq--keep-transient ()
+  "Predicate that returns t when the transient keymap should be maintained."
+  (let ((command-keys (this-command-keys-vector)))
+    (or (equal command-keys (vconcat ess-smart-equals-key))
+        (and (memq 'percent ess-smart-equals-extra-ops)
+             (equal command-keys (vector ?%))))))
+
+
 ;;; Buffer Contents
 
 (defun essmeq--whitespace-span-forward (&optional position)
@@ -696,353 +1043,6 @@ nil."
       (let ((m (essmeq--complete fsm partial pos (- pos span))))
         ;; Replace the index by the operator string
         (when m (cons (aref targets (car m)) (cdr m)))))))
-
-
-;;; Key Configuration and Utilities
-
-(defun ess-smart-equals-refresh-mode ()
-  "Re-enable `ess-smart-equals-mode' in all buffers where it is enabled.
-This has the effect of refreshing all the mode's keymaps,
-contexts, and options. It is intended for use in customization
-setters for options that affect pre-computed tables or keymaps,
-but it can be used interactively as well, for instance, after
-manually updating the values of such options."
-  (interactive)
-  (dolist (buf (buffer-list))
-    (with-current-buffer buf
-      (when (and (boundp 'ess-smart-equals-mode) ess-smart-equals-mode)
-        (let ((inhibit-message t))
-          (ess-smart-equals-mode 1))))))
-
-(defcustom ess-smart-equals-key "="
-  "The key for smart assignment operators when `ess-smart-equals-mode' active.
-
-For changes in this variable to take effect, some precomputed
-information must be refreshed in `ess-smart-equals-mode' buffers.
-Changing the variable through the customization mechanism does
-such a refresh automatically. If instead you manually change the
-value of this option (e.g., with `setq'), you can either disabled
-and re-enabled the minor mode in one such buffer or do
-
-   M-x ess-smart-equals-refresh-mode
-
-interactively, or (ess-smart-equals-refresh-mode) in lisp, to
-make this change take effect."
-  :group 'ess-edit
-  :type 'string
-  :initialize 'custom-initialize-default
-  :set (lambda (sym val)
-         (set-default sym val)
-         (ess-smart-equals-refresh-mode)))
-
-(defcustom ess-smart-equals-extra-ops nil
-  "If non-nil, a symbol list of extra smart operators to bind in the mode map.
-Currently, only `brace' and `paren' are supported.
-
-For changes in this variable to take effect, some precomputed
-information must be refreshed in `ess-smart-equals-mode' buffers.
-Changing the variable through the customization mechanism does
-such a refresh automatically. If instead you manually change the
-value of this option (e.g., with `setq'), you can either disabled
-and re-enabled the minor mode in one such buffer or do
-
-   M-x ess-smart-equals-refresh-mode
-
-interactively, or (ess-smart-equals-refresh-mode) in lisp, to
-make this change take effect."
-  :group 'ess-edit
-  :type '(choice (const nil) (repeat (const brace) (const paren)))
-  :initialize 'custom-initialize-default
-  :set (lambda (sym val)
-         (set-default sym val)
-         (ess-smart-equals-refresh-mode)))
-
-(defcustom ess-smart-equals-cancel-keys (list [backspace]
-                                              (kbd "<DEL>"))
-  "List of keys transiently bound to cancel operator insertion or cycling.
-A shifted version of each will instead delete backwards a
-character, clearing the transient keymap and making it easy to
-delete only part of an operator if desired.
-
-For changes in this variable to take effect, some precomputed
-information must be refreshed in `ess-smart-equals-mode' buffers.
-Changing the variable through the customization mechanism does
-such a refresh automatically. If instead you manually change the
-value of this option (e.g., with `setq'), you can either disabled
-and re-enabled the minor mode in one such buffer or do
-
-   M-x ess-smart-equals-refresh-mode
-
-interactively, or (ess-smart-equals-refresh-mode) in lisp, to
-make this change take effect."
-  :group 'ess-edit
-  :type '(repeat
-          (choice string (restricted-sexp :match-alternatives (vectorp))))
-  :initialize 'custom-initialize-default
-  :set (lambda (sym val)
-         (set-default sym val)
-         (ess-smart-equals-refresh-mode)))
-
-(defun essmeq--transient-equals (&optional literal)
-  "A version of `ess-smart-equals' for use in the transient key map.
-This detects previous use of `ess-smart-equals-percent' and clears that
-operator if the user switches to equals."
-  (interactive "P")
-  (ignore literal)
-  (when (eq last-command 'ess-smart-equals-percent)
-    (let ((ess-smart-equals-overriding-context '%))
-      (essmeq--remove 'only-match)))
-  (call-interactively #'ess-smart-equals))
-
-(defun essmeq--make-transient-map (&optional cancel-keys)
-  "Resets transient keymap used after `ess-smart-equals'.
-CANCEL-KEYS, if non-nil, is a list of keys in that map that will
-clear the last insertion. It defaults to
-`ess-smart-equals-cancel-keys', which see. See also
-`essmeq--transient-map'."
-  (let ((cancel-keys (or cancel-keys ess-smart-equals-cancel-keys))
-        (percentp (memq 'percent ess-smart-equals-extra-ops))
-        (map (make-sparse-keymap)))
-    (if (not percentp)
-        (define-key map (kbd ess-smart-equals-key) #'ess-smart-equals)
-      (define-key map "%" #'ess-smart-equals-percent)
-      (define-key map (kbd ess-smart-equals-key) #'essmeq--transient-equals))
-    (define-key map "\t" #'essmeq--selected)
-    (dolist (key cancel-keys)
-      (define-key map key #'essmeq--remove)
-      (when (and (or (stringp key) (vectorp key))
-                 (= (length key) 1))
-        (define-key map ;; make shift-cancel just do regular backspace
-          (vector (if (listp (aref key 0))
-                      (cons 'shift (aref key 0))
-                    (list 'shift (aref key 0))))
-          'delete-backward-char)))
-    map))
-
-(defun essmeq--make-mode-map ()
-  "Returns the `ess-smart-equals-mode' keymap using current parameter values."
-  (let ((map (make-sparse-keymap)))
-    (define-key map ess-smart-equals-key 'ess-smart-equals)
-    (when (memq 'brace ess-smart-equals-extra-ops)
-      (define-key map "{" 'ess-smart-equals-open-brace))
-    (when (memq 'paren ess-smart-equals-extra-ops)
-      (define-key map "(" 'ess-smart-equals-open-paren))
-    (when (memq 'percent ess-smart-equals-extra-ops)
-      (define-key map "%" 'ess-smart-equals-percent))
-    map))
-
-(defvar ess-smart-equals-mode-map (essmeq--make-mode-map)
-  "Keymap used in `ess-smart-equals-mode' binding smart operators.")
-
-(defvar essmeq--transient-map (essmeq--make-transient-map)
-  "Map bound transiently after `ess-smart-equals' key is pressed.
-The map continues to be active as long as that key is pressed.")
-
-(defun ess-smart-equals-update-keymaps ()
-  "Force update of `ess-smart-equals-mode' keymaps to adjust for config changes.
-This should not usually need to be done explicitly by the user."
-  (interactive)
-  ;; The `ess-smart-equals-mode' entry in `minor-mode-map-alist' is identical
-  ;; to `ess-smart-equals-mode-map', if the map is set. In this case,
-  ;; simply doing `setq' will break the synchrony and the new map will
-  ;; not be reflected in the minor mode bindings. So we use `setcdr' instead.
-  (if (keymapp ess-smart-equals-mode-map)
-      (setcdr ess-smart-equals-mode-map (cdr (essmeq--make-mode-map)))
-    (setq ess-smart-equals-mode-map (essmeq--make-mode-map)))
-  (setq essmeq--transient-map (essmeq--make-transient-map)))
-
-(defun essmeq--keep-transient ()
-  "Predicate that returns t when the transient keymap should be maintained."
-  (let ((command-keys (this-command-keys-vector)))
-    (or (equal command-keys (vconcat ess-smart-equals-key))
-        (and (memq 'percent ess-smart-equals-extra-ops)
-             (equal command-keys (vector ?%))))))
-
-
-;;; Behavior Configuration
-
-(defcustom ess-smart-equals-padding-left 'one-space
-  "Specifies padding used on left side of inserted and completed operators.
-
-This can have one of the following values:
-
-   * The symbol `one-space' means to insert exactly one space, eliminating
-     any other contiguous whitespace on the left.
-
-   * The symbol `no-space' means to eliminate all adjacent whitespace on
-     the left.
-
-   * The symbol `some-space' means to ensure there is at least one space
-     on the left, either in existing whitespace (which is kept as is)
-     or by inserting a space if none.
-
-   * The symbol `none' means to insert no padding and make no change
-     to the surrounding whitespace. (A nil value has the same effect
-     but is marginally slower.)
-
-   * A string means to insert that string on the left.
-
-   * A function with signature (begin-ws begin &optional extent)
-
-     When inserting or completing an operator this function
-     should insert desired padding on the right. The function is
-     called within a `save-excursion', so point can be moved and
-     insertions made. In this case, the function is called with
-     two positions: BEGIN-WS is the position of the leftmost
-     contiguous whitespace character to the left of the operator
-     and BEGIN is the position of the left side of the operator.
-
-     When removing an operator, this function should return the
-     beginning of the padded region assuming that an operator has
-     just been inserted and padded (i.e., by calling this
-     function). It should not change the current buffer. This
-     case is distinguished by having the third argument EXTENT eq
-     to t and *both* BEGIN-WS and BEGIN pointing to the leftmost
-     point of the inserted operator.
-"
-  :group 'ess-edit
-  :type '(choice (const :tag "Only One Space" one-space)
-                 (const :tag "No Spaces" no-space)
-                 (const :tag "At Least One Space" some-space)
-                 (const :tag "No Padding" none)
-                 string
-                 function))
-
-(defcustom ess-smart-equals-padding-right 'one-space
-  "Specifies padding used on right side of inserted and completed operators.
-
-This can have one of the following values:
-
-   * The symbol `one-space' means to insert exactly one space, eliminating
-     any other contiguous whitespace on the right.
-
-   * The symbol `no-space' means to eliminate all adjacent whitespace on
-     the right.
-
-   * The symbol `some-space' means to ensure there is at least one space
-     on the right, either in existing whitespace (which is kept as is)
-     or by inserting a space if none.
-
-   * The symbol `none' means to insert no padding and make no change
-     to the surrounding whitespace. (A nil value has the same effect
-     but is marginally slower.)
-
-   * A string means to insert that string on the right.
-
-   * A function with signature (end end-ws &optional extent)
-
-     When inserting or completing an operator this function
-     should insert desired padding on the right. The function is
-     called within a `save-excursion', so point can be moved and
-     insertions made. In this case, the function is called with
-     two positions: END is the position of the right side of the
-     inserted operator and END-WS is the position of the
-     rightmost contiguous whitespace character to the right of
-     the operator.
-
-     When removing an operator, this function should return the
-     beginning of the padded region assuming that an operator has
-     just been inserted and padded (i.e., by calling this
-     function). It should not change the current buffer. This
-     case is distinguished by having the third argument EXTENT eq
-     to t and *both* END and END-WS pointing to the rightmost
-     point of the inserted operator.
-"
-  :group 'ess-edit
-  :type '(choice (const :tag "Only One Space" one-space)
-                 (const :tag "No Spaces" no-space)
-                 (const :tag "At Least One Space" some-space)
-                 (const :tag "No Padding" none)
-                 string
-                 function))
-
-(defvar-local ess-smart-equals-narrow-function nil
-  "If non-nil, a nullary function to restrict syntax checking to a region.
-This is useful in cases such as `inferior-ess-r-mode' where
-attention should be focused on a prompt line or the region
-between prompts, both for efficiency and because output or
-erroneous input on earlier prompts can confuse the syntax
-checker. See `ess-smart-equals-repl-narrow' and
-`ess-smart-equals-mode-options'.")
-
-(defcustom ess-smart-equals-insertion-hook nil
-  "A function called when an operator is inserted into the current buffer.
-This (non-standard hook) function should accept six arguments
-
-       CONTEXT MATCH-TYPE STRING START OLD-END PAD
-
-where CONTEXT is a context symbol, representing a key in the
-inner alists of `ess-smart-equals-contexts'; MATCH-TYPE is one of
-the keywords :exact, :partial, :no-match, or :literal; STRING is
-the operator string that was inserted; START is the buffer
-positions at the beginning of the inserted string (plus padding);
-OLD-END was the ending position of the previous content in the
-buffer; and PAD is a string giving the padding used on either
-side of the inserted operator, typically either empty or a single
-space.
-
-This feature is experimental and may be removed in a future version."
-  :group 'ess-edit
-  :type '(choice (const :tag "None" nil) function))
-
-(defcustom ess-smart-equals-default-modes
-  '(ess-r-mode inferior-ess-r-mode ess-r-transcript-mode ess-roxy-mode)
-  "List of major modes where `ess-smart-equals-activate' binds '=' by default."
-  :group 'ess-edit
-  :type '(repeat symbol))
-
-(defcustom ess-smart-equals-brace-newlines '((open after)
-                                             (close before))
-  "Controls auto-newlines for braces in `electric-smart-equals-open-brace'.
-Only applicable when `ess-smart-equals-extra-ops' contains the
-symbol `brace'. This is an alist with keys `open' and `close' and
-with values that are lists containing the symbols `after' and/or
-`before', indicating when a newline should be placed. A missing
-key is equivalent to a nil value, meaning to place no newlines.
-
-This can be controlled via Emacs's customization mechanism or can
-be added to your ESS style specification, as preferred."
-  :group 'ess-edit
-  :type '(alist :key-type (choice (const open) (const close))
-                :value-type (repeat (choice (const before) (const after)))))
-
-
-;;; Specialized overriding context and transient exit functions
-
-(defvar-local ess-smart-equals-overriding-context nil
-  "If non-nil, a context symbol that overrides the usual context calculation.
-Intended to be used in a transient manner, see
-`ess-smart-equals-transient-exit-function'.")
-
-(defvar-local ess-smart-equals-transient-exit-function nil
-  "If non-nil, a nullary function to be called on exit from the transient keymap.
-This can be used, for instance, to clear an overriding context.
-See `essmeq--transient-map'")
-
-(defvar-local essmeq--stop-transient nil
-  "A nullary function called to deactivate the most recent transient map.
-This is set automatically and should not be set explicitly. If
-non-nil, a nullary function to be called on exit from the
-transient keymap. This can be used, for instance, to clear an
-overriding context if something goes awry. See
-`essmeq--transient-map'.")
-
-(defun ess-smart-equals-clear-overriding-context ()
-  "Transient exit function that resets both itself and any overriding context.
-This is a convenience function for fixing a context during one
-cycle of smart equals insertion. See
-`ess-smart-equals-overriding-context' and
-`ess-smart-equals-transient-exit-function'.."
-  (setq ess-smart-equals-overriding-context      nil
-        ess-smart-equals-transient-exit-function nil))
-
-(defun ess-smart-equals-set-overriding-context (context)
-  "Force context to be symbol CONTEXT for next insertion only.
-This sets `ess-smart-equals-transient-exit-function' to clear the context
-the next time the transient map in `ess-smart-equals' exits."
-  (setq ess-smart-equals-overriding-context  context
-        ess-smart-equals-transient-exit-function
-          #'ess-smart-equals-clear-overriding-context))
 
 
 ;;; Context and Matcher Configuration and Utilities
