@@ -6,8 +6,8 @@
 ;; Maintainer: Christopher R. Genovese <genovese@cmu.edu>
 ;; Keywords: R, S, ESS, convenience
 ;; URL: https://github.com/genovese/ess-smart-equals
-;; Version: 0.3.1
-;; Package-Version: 0.3.1
+;; Version: 0.3.2
+;; Package-Version: 0.3.2
 ;; Package-Requires: ((emacs "25.1") (ess "18.10"))
 
 
@@ -204,7 +204,7 @@
 
 ;;; Change Log:
 ;;
-;;  0.3.0 -- Breaking changes in functionality, design, and configuration.
+;;  0.3.x -- Breaking changes in functionality, design, and configuration.
 ;;           No longer relies on `ess-S-assign' which was deprecated in
 ;;           ESS. Now provides more powerful context-sensitive, prioritized
 ;;           operator lists with cycling and completion. The mode is now,
@@ -1420,20 +1420,20 @@ in `ess-smart-equals-contexts', so the corresponding list can be
 customized to determine ordering. This should be bound to the `%'
 key."
   (interactive "P")
-  (if literal
+  (if (or literal
+          (let ((closing-char (ess-inside-string-or-comment-p)))
+            (and closing-char (not (equal closing-char ?%)))))
       (self-insert-command (if (integerp literal) literal 1))
-    (unless (let ((closing-char (ess-inside-string-or-comment-p)))
-              (and closing-char (/= closing-char ?%)))
-      (unless (eq last-command this-command)
-        (let ((ess-smart-equals-overriding-context 'not-%))
-          (essmeq--remove 'only-match))
-        (setq essmeq--stop-transient
-              (set-transient-map essmeq--transient-map
-                                 #'essmeq--keep-transient
-                                 ess-smart-equals-transient-exit-function)))
-      (ess-smart-equals-set-overriding-context '%)
-      (essmeq--process nil t)
-      (ess-smart-equals-clear-overriding-context))))
+    (unless (eq last-command this-command)
+      (let ((ess-smart-equals-overriding-context 'not-%))
+        (essmeq--remove 'only-match))
+      (setq essmeq--stop-transient
+            (set-transient-map essmeq--transient-map
+                               #'essmeq--keep-transient
+                               ess-smart-equals-transient-exit-function)))
+    (ess-smart-equals-set-overriding-context '%)
+    (essmeq--process nil t)
+    (ess-smart-equals-clear-overriding-context)))
 
 ;;;###autoload
 (defun ess-smart-equals-open-brace (&optional literal)
