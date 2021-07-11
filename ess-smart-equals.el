@@ -1199,7 +1199,7 @@ Return pair of regexes matching the two prompts, (PRIMARY . SECONDARY)."
   "Return region around point for syntax checking in R repl output buffer."
   (if-let* ((proc (get-buffer-process (current-buffer)))
             (pm (process-mark proc))
-            ((> (point) pm)))
+            (zzz (> (point) pm)))
       (list (marker-position pm) (point-max))
     (pcase-let* ((`(,primary . ,secondary) (ess-smart-equals-prompts))
                  (prompt-re (concat primary "\\|" secondary))
@@ -1329,7 +1329,7 @@ ignored."
          (matcher (map-elt essmeq--matcher-alist context)))
     (essmeq--with-matcher (fsm targets span partial) matcher
       (if-let* ((num-ops (length targets)) ;; ATTN: this will be max-cycle,
-                ((> num-ops 0)) ;;       and can get rid of num-ops
+                (zzz (> num-ops 0)) ;;       and can get rid of num-ops
                 (limit (- pos span)))
           (pcase-let ((`(,accepted ,slen ,start . ,_)
                        (or (essmeq--match fsm pos limit)
