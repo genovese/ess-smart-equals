@@ -234,6 +234,21 @@
 
 ;;; Utility Macros
 
+(unless (symbol-function 'if-let*)
+  (defmacro if-let* (varlist then &rest else)
+    "Bind variables according to VARLIST and evaluate THEN or ELSE.
+This is like `if-let' but doesn't handle a VARLIST of the form
+\(SYMBOL SOMETHING) specially."
+    (declare (indent 2)
+	     (debug ((&rest [&or symbolp (symbolp form) (form)])
+		     form body)))
+    (if varlist
+	`(let* ,(setq varlist (internal--build-bindings varlist))
+	   (if ,(caar (last varlist))
+	       ,then
+	     ,@else))
+      `(let* () ,then))))
+
 (defmacro essmeq--with-struct-slots (type spec-list inst &rest body)
   "Execute BODY with vars in SPEC-LIST bound to slots in struct INST of TYPE.
 TYPE is an unquoted symbol corresponding to a type defined by
